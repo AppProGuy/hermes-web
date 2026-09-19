@@ -311,6 +311,7 @@ class LocalSession:
 
 
 session = LocalSession()
+remote_runtime_config: Dict[str, str] = {"provider": "", "model": ""}
 AIAgent = None
 get_model_context_length = None
 set_approval_callback = None
@@ -389,6 +390,86 @@ async def _remote_request(method: str, path: str) -> Response:
     return Response(upstream.content, status_code=upstream.status_code, headers=headers)
 
 
+def _local_model_options() -> dict:
+    from hermes_cli.inventory import build_models_payload, load_picker_context
+
+    context = load_picker_context().with_overrides(
+        current_provider=session.config.get("provider"),
+        current_model=session.config.get("model"),
+        current_base_url=session.config.get("base_url"),
+    )
+    return build_models_payload(context, max_models=50)
+
+
+async def _remote_model_options() -> dict:
+    """Use the remote inventory, with a current-model fallback for older servers."""
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
+            upstream = await client.get(f"{REMOTE_URL}/api/model/options", headers=_remote_headers())
+        content_type = upstream.headers.get("content-type", "").lower()
+        payload = upstream.json() if "json" in content_type else None
+        if upstream.is_success and isinstance(payload, dict) and isinstance(payload.get("providers"), list):
+            return payload
+    except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+    provider = remote_runtime_config.get("provider", "")
+    model = remote_runtime_config.get("model", "")
+    providers = []
+    if provider:
+        providers.append(
+            {
+                "slug": provider,
+                "name": provider,
+                "models": [model] if model else [],
+                "is_current": True,
+                "total_models": 1 if model else 0,
+                "source": "current-runtime",
+            }
+        )
+    return {"providers": providers, "provider": provider, "model": model, "limited": True}
+
+
+def _switch_local_model(provider: str, model: str) -> tuple[bool, str]:
+    """Resolve credentials and runtime settings through Hermes' native switcher."""
+    from hermes_cli.inventory import load_picker_context
+    from hermes_cli.model_switch import switch_model
+
+    provider = provider.strip()
+    model = model.strip()
+    if not provider or not model:
+        return False, "Choose both a provider and a model."
+    if provider == session.config.get("provider") and model == session.config.get("model"):
+        return True, ""
+
+    context = load_picker_context()
+    result = switch_model(
+        model,
+        current_provider=session.config.get("provider", ""),
+        current_model=session.config.get("model", ""),
+        current_base_url=session.config.get("base_url") or "",
+        current_api_key=session.config.get("api_key") or "",
+        explicit_provider=provider,
+        user_providers=context.user_providers,
+        custom_providers=context.custom_providers,
+    )
+    if not result.success:
+        return False, result.error_message or "Hermes could not switch to that model."
+
+    session.config.update(
+        {
+            "provider": result.target_provider,
+            "model": result.new_model,
+            "base_url": result.base_url or None,
+            "api_key": result.api_key or None,
+        }
+    )
+    session.config.pop("_ctx_limit", None)
+    # Recreate agents on their next turn so the selected runtime takes effect.
+    session.agents.clear()
+    return True, result.warning_message
+
+
 @app.get("/api/health")
 async def health(request: Request):
     _require_http_auth(request)
@@ -401,6 +482,13 @@ async def health(request: Request):
         return {"ok": True, "mode": "proxy", "remote": urlparse(REMOTE_URL).hostname, "version": 2}
     except Exception:
         return JSONResponse({"ok": False, "mode": "proxy", "error": "Remote Hermes is unavailable"}, status_code=503)
+
+
+@app.get("/api/model/options")
+async def model_options(request: Request):
+    _require_http_auth(request)
+    payload = await _remote_model_options() if REMOTE_URL else _local_model_options()
+    return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/conversations")
@@ -487,6 +575,8 @@ async def _proxy_websocket(websocket: WebSocket) -> None:
                         event = json.loads(message)
                         if event.get("type") == "config_loaded":
                             event.pop("api_key", None)
+                            remote_runtime_config["provider"] = str(event.get("provider") or "")
+                            remote_runtime_config["model"] = str(event.get("model") or "")
                         message = json.dumps(event)
                     except (TypeError, ValueError, json.JSONDecodeError):
                         pass
@@ -602,15 +692,31 @@ async def _local_websocket(websocket: WebSocket) -> None:
             message_type = data.get("type", "message")
 
             if message_type == "configure":
-                for key in ("model", "provider", "max_iterations"):
-                    if key in data:
-                        session.config[key] = data[key]
-                session.config.pop("_ctx_limit", None)
+                selected_provider = str(data.get("provider") or session.config.get("provider") or "")
+                selected_model = str(data.get("model") or session.config.get("model") or "")
+                switched, detail = await asyncio.to_thread(
+                    _switch_local_model, selected_provider, selected_model
+                )
+                if not switched:
+                    await session.send(
+                        "config_error",
+                        message=detail,
+                        _conv_id=session.conversation_id,
+                    )
+                    continue
+                if "max_iterations" in data:
+                    try:
+                        iterations = int(data["max_iterations"])
+                    except (TypeError, ValueError):
+                        iterations = session.config["max_iterations"]
+                    session.config["max_iterations"] = max(1, min(500, iterations))
                 await session.send(
                     "config_loaded",
                     conv_id=session.conversation_id,
                     **{k: v for k, v in session.config.items() if k != "api_key"},
                 )
+                if detail:
+                    await session.send("notice", message=detail, _conv_id=session.conversation_id)
                 continue
 
             if message_type in {"approval_response", "clarification_response"}:

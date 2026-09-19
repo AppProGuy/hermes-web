@@ -268,8 +268,8 @@
       <div class="modal-head"><h2 id="settingsTitle">Hermes settings</h2><button class="icon-btn" id="closeSettings" type="button" aria-label="Close settings">×</button></div>
       <div class="modal-body">
         <div class="field"><label for="tokenInput">Web access token</label><input id="tokenInput" type="password" autocomplete="off" placeholder="Only needed when server protection is enabled"><div class="hint">Stored only in this browser. It is never placed in chat history.</div></div>
-        <div class="field"><label for="modelInput">Model</label><input id="modelInput" placeholder="Use the backend default"></div>
-        <div class="field"><label for="providerInput">Provider</label><input id="providerInput" placeholder="Use the backend default"></div>
+        <div class="field"><label for="providerSelect">Provider</label><select id="providerSelect" disabled><option>Loading providers…</option></select></div>
+        <div class="field"><label for="modelSelect">Model</label><select id="modelSelect" disabled><option>Choose a provider first</option></select><div class="hint" id="modelPickerHint">Only providers already connected to Hermes are shown.</div></div>
         <div class="field"><label for="iterationsInput">Maximum tool iterations</label><input id="iterationsInput" type="number" min="1" max="500" value="60"></div>
         <div class="toggle-row"><div><strong>Play generated speech</strong><span>Attempt playback when Hermes returns a TTS audio file.</span></div><input class="switch" id="autoplayInput" type="checkbox" checked></div>
       </div>
@@ -295,6 +295,8 @@
       listening: false,
       manualScroll: false,
       objectUrls: [],
+      modelOptions: null,
+      modelOptionsLoading: null,
     };
 
     const $ = id => document.getElementById(id);
@@ -321,6 +323,57 @@
       }
       if (!response.ok) throw new Error(`Request failed (${response.status})`);
       return response;
+    }
+
+    function option(value, label = value) {
+      const item = document.createElement("option");
+      item.value = value;
+      item.textContent = label;
+      return item;
+    }
+
+    function providerModels(provider) {
+      const row = (state.modelOptions?.providers || []).find(item => item.slug === provider);
+      if (!row || !Array.isArray(row.models)) return [];
+      return row.models.map(model => typeof model === "string" ? model : (model.id || model.name || "")).filter(Boolean);
+    }
+
+    function renderModelPicker(provider = state.config.provider || "", model = state.config.model || "") {
+      const providerSelect = $("providerSelect");
+      const modelSelect = $("modelSelect");
+      const providers = state.modelOptions?.providers || [];
+      providerSelect.replaceChildren();
+      providers.forEach(row => providerSelect.append(option(row.slug, row.name || row.slug)));
+      if (provider && !providers.some(row => row.slug === provider)) providerSelect.append(option(provider));
+
+      const selectedProvider = providers.some(row => row.slug === provider) || provider ? provider : (providers[0]?.slug || "");
+      providerSelect.value = selectedProvider;
+      providerSelect.disabled = !providers.length && !selectedProvider;
+
+      const models = providerModels(selectedProvider);
+      modelSelect.replaceChildren();
+      models.forEach(name => modelSelect.append(option(name)));
+      if (model && selectedProvider === (state.config.provider || selectedProvider) && !models.includes(model)) modelSelect.append(option(model));
+      const selectedModel = modelSelect.querySelector(`option[value="${CSS.escape(model)}"]`) ? model : (models[0] || model || "");
+      modelSelect.value = selectedModel;
+      modelSelect.disabled = !modelSelect.options.length;
+
+      $("modelPickerHint").textContent = state.modelOptions?.limited
+        ? "The remote Hermes server needs the latest web update before its full model list can be shown."
+        : "Only providers already connected to Hermes are shown.";
+    }
+
+    async function loadModelOptions(force = false) {
+      if (state.modelOptions && !force) { renderModelPicker(); return state.modelOptions; }
+      if (state.modelOptionsLoading) return state.modelOptionsLoading;
+      $("providerSelect").disabled = true;
+      $("modelSelect").disabled = true;
+      state.modelOptionsLoading = api("/api/model/options")
+        .then(response => response.json())
+        .then(payload => { state.modelOptions = payload; renderModelPicker(); return payload; })
+        .catch(error => { $("modelPickerHint").textContent = error.message; throw error; })
+        .finally(() => { state.modelOptionsLoading = null; });
+      return state.modelOptionsLoading;
     }
 
     function websocketUrl() {
@@ -788,11 +841,12 @@
             }
           }
           $("agentName").textContent = data.model || "Hermes Agent";
-          $("modelInput").value = data.model || "";
-          $("providerInput").value = data.provider || "";
+          if (state.modelOptions) renderModelPicker(data.provider || "", data.model || "");
           $("iterationsInput").value = data.max_iterations || 60;
           refreshHistory().catch(() => {});
           break;
+        case "config_error": toast(data.message || "Could not change the model"); break;
+        case "notice": toast(data.message || "Settings updated"); break;
         case "load_conversation":
           renderConversation(data.messages || []);
           updateContext(data.context);
@@ -1016,7 +1070,8 @@
       $("tokenInput").value = token();
       $("autoplayInput").checked = localStorage.getItem("hermesAutoPlay") !== "false";
       $("settingsOverlay").classList.add("open");
-      setTimeout(() => $("tokenInput").focus(), 50);
+      loadModelOptions().catch(() => {});
+      setTimeout(() => $("providerSelect").focus(), 50);
     }
 
     function closeSettings() { $("settingsOverlay").classList.remove("open"); }
@@ -1029,8 +1084,8 @@
       if (state.ws?.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({
           type: "configure",
-          model: $("modelInput").value.trim(),
-          provider: $("providerInput").value.trim(),
+          model: $("modelSelect").value,
+          provider: $("providerSelect").value,
           max_iterations: Math.max(1, Number($("iterationsInput").value || 60)),
         }));
       }
@@ -1052,6 +1107,7 @@
     $("closeSettings").addEventListener("click", closeSettings);
     $("cancelSettings").addEventListener("click", closeSettings);
     $("settingsForm").addEventListener("submit", event => { event.preventDefault(); saveSettings(); });
+    $("providerSelect").addEventListener("change", event => renderModelPicker(event.target.value, ""));
     $("settingsOverlay").addEventListener("click", event => { if (event.target === $("settingsOverlay")) closeSettings(); });
     $("menuButton").addEventListener("click", openSidebar);
     $("scrim").addEventListener("click", closeSidebar);
