@@ -269,7 +269,7 @@ class LocalSession:
             "provider": DEFAULT_PROVIDER,
             "base_url": DEFAULT_BASE_URL or None,
             "api_key": DEFAULT_API_KEY or None,
-            "max_iterations": 60,
+            "max_iterations": 12,
         }
         self.reasoning: Dict[str, str] = {}
         self.thinking: Dict[str, str] = {}

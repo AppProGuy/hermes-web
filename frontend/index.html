@@ -291,7 +291,7 @@
         <div class="field"><label for="tokenInput">Web access token</label><input id="tokenInput" type="password" autocomplete="off" placeholder="Only needed when server protection is enabled"><div class="hint">Stored only in this browser. It is never placed in chat history.</div></div>
         <div class="field"><label for="providerSelect">Provider</label><select id="providerSelect" disabled><option>Loading providers…</option></select></div>
         <div class="field"><label for="modelSearch">Model</label><input id="modelSearch" type="search" autocomplete="off" placeholder="Search models…" disabled><select id="modelSelect" class="model-select" disabled><option>Choose a provider first</option></select><div class="hint" id="modelPickerHint">Only providers already connected to Hermes are shown.</div></div>
-        <div class="field"><label for="iterationsInput">Maximum tool iterations</label><input id="iterationsInput" type="number" min="1" max="500" value="60"></div>
+        <div class="field"><label for="iterationsInput">Maximum tool iterations</label><input id="iterationsInput" type="number" min="1" max="500" value="12"></div>
         <div class="toggle-row"><div><strong>Play generated speech</strong><span>Attempt playback when Hermes returns a TTS audio file.</span></div><input class="switch" id="autoplayInput" type="checkbox" checked></div>
       </div>
       <div class="modal-actions"><button class="small-btn" id="cancelSettings" type="button">Cancel</button><button class="small-btn primary" id="saveSettings" type="submit">Save</button></div>
@@ -788,7 +788,7 @@
           }
           $("agentName").textContent = data.model || "Hermes Agent";
           if (state.modelOptions) renderModelPicker(data.provider || "", data.model || "");
-          $("iterationsInput").value = data.max_iterations || 60;
+          $("iterationsInput").value = data.max_iterations || 12;
           refreshHistory().catch(() => {});
           break;
         case "config_error": toast(data.message || "Could not change the model"); break;
@@ -1178,7 +1178,7 @@
           type: "configure",
           model: $("modelSelect").value,
           provider: $("providerSelect").value,
-          max_iterations: Math.max(1, Number($("iterationsInput").value || 60)),
+          max_iterations: Math.max(1, Number($("iterationsInput").value || 12)),
         }));
       }
       closeSettings();

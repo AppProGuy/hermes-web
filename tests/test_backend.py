@@ -19,6 +19,9 @@ SPEC.loader.exec_module(backend)
 
 
 class BackendUnitTests(unittest.TestCase):
+    def test_default_tool_iteration_limit_stays_bounded(self):
+        self.assertEqual(backend.session.config["max_iterations"], 12)
+
     def test_conversation_ids_are_strict_uuids(self):
         self.assertTrue(backend._valid_id(str(uuid.uuid4())))
         self.assertFalse(backend._valid_id("../../config.yaml"))
