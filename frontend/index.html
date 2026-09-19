@@ -127,26 +127,6 @@
     .pulse i { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite; }
     .pulse i:nth-child(2) { animation-delay: .15s; } .pulse i:nth-child(3) { animation-delay: .3s; }
     @keyframes pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-2px); } }
-    .reasoning { border-left: 1px solid #34343a; color: var(--faint); margin: 6px 0 9px 12px; padding: 2px 0 2px 10px; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
-
-    .tool-stack { margin: 8px 0 12px 34px; display: grid; gap: 6px; }
-    .tool-summary { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 10px; margin: 3px 1px; }
-    .tool-summary button { margin-left: auto; border: 0; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
-    .tool-card { border: 1px solid var(--line); background: #0c0c0e; border-radius: 10px; overflow: hidden; }
-    .tool-head { width: 100%; border: 0; background: transparent; padding: 9px 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left; }
-    .tool-head:hover { background: #121214; }
-    .tool-icon { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; background: #1e1e22; color: var(--amber); font-size: 10px; }
-    .tool-icon.done { color: var(--green); }
-    .tool-name { font: 11px var(--mono); color: #d2d2d6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .tool-status { margin-left: auto; font-size: 9px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
-    .chevron { color: var(--faint); font-size: 9px; transition: transform .15s; }
-    .tool-card.open .chevron { transform: rotate(90deg); }
-    .tool-body { display: none; border-top: 1px solid var(--line-soft); padding: 10px; }
-    .tool-card.open .tool-body { display: block; }
-    .tool-label { color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; margin: 8px 0 5px; }
-    .tool-label:first-child { margin-top: 0; }
-    .tool-body pre { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: #a9a9b0; font: 10px/1.55 var(--mono); }
-
     .interaction { margin: 10px 0 12px 34px; border: 1px solid #4a3a1d; background: #17130b; border-radius: 11px; padding: 12px; }
     .interaction.danger { border-color: #55242e; background: #190d11; }
     .interaction-kicker { color: var(--amber); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800; }
@@ -217,7 +197,7 @@
       .topbar { padding: 0 10px; }
       .feed { width: min(100% - 22px, var(--content)); padding-top: 16px; }
       .composer-wrap { padding-left: 10px; padding-right: 10px; }
-      .tool-stack, .interaction, .error { margin-left: 0; }
+      .interaction, .error { margin-left: 0; }
       .prompts { grid-template-columns: 1fr; }
       .context-pill { display: none !important; }
       .composer-note { display: none; }
@@ -285,13 +265,10 @@
       reconnectTimer: null,
       currentConversation: null,
       currentTurn: null,
-      currentReasoning: null,
       streamingBubble: null,
       streamingText: "",
       processing: {},
       config: {},
-      toolCards: new Map(),
-      expandedAll: false,
       recognition: null,
       listening: false,
       manualScroll: false,
@@ -536,10 +513,8 @@
 
     function resetTransient() {
       state.currentTurn = null;
-      state.currentReasoning = null;
       state.streamingBubble = null;
       state.streamingText = "";
-      state.toolCards.clear();
     }
 
     function isProcessing() { return Boolean(state.processing[state.currentConversation || "pending"]); }
@@ -558,7 +533,6 @@
       turn.className = "turn";
       feed.append(turn);
       state.currentTurn = turn;
-      state.currentReasoning = null;
       state.streamingBubble = null;
       state.streamingText = "";
       return turn;
@@ -640,108 +614,15 @@
       scrollBottom();
     }
 
-    function updateThinking(text) {
-      const el = $("thinkingText");
-      if (el && text) el.textContent = text;
-      else if (!el) addThinking(text || "Thinking…");
-    }
+    function showWorking() { if (!$("thinking")) addThinking("Working…"); }
 
     function removeThinking() { $("thinking")?.remove(); }
 
-    function addReasoning(text) {
-      if (!state.currentReasoning) {
-        const block = document.createElement("div");
-        block.className = "reasoning";
-        currentContainer().append(block);
-        state.currentReasoning = block;
-      }
-      state.currentReasoning.textContent += text;
-      scrollBottom();
-    }
-
-    function toolStack() {
-      let stack = currentContainer().querySelector(":scope > .tool-stack");
-      if (!stack) {
-        stack = document.createElement("div");
-        stack.className = "tool-stack";
-        currentContainer().append(stack);
-      }
-      return stack;
-    }
-
-    function updateToolSummary() {
-      const stack = toolStack();
-      let summary = stack.querySelector(".tool-summary");
-      const count = stack.querySelectorAll(".tool-card").length;
-      if (!count) return;
-      if (!summary) {
-        summary = document.createElement("div");
-        summary.className = "tool-summary";
-        const label = document.createElement("span");
-        const toggle = document.createElement("button");
-        toggle.addEventListener("click", () => {
-          state.expandedAll = !state.expandedAll;
-          stack.querySelectorAll(".tool-card").forEach(card => card.classList.toggle("open", state.expandedAll));
-          toggle.textContent = state.expandedAll ? "Collapse all" : "Expand all";
-        });
-        summary.append(label, toggle);
-        stack.prepend(summary);
-      }
-      summary.querySelector("span").textContent = `${count} tool call${count === 1 ? "" : "s"}`;
-      summary.querySelector("button").textContent = state.expandedAll ? "Collapse all" : "Expand all";
-    }
-
-    function addToolCard(id, name, args, reasoning = "", status = "running", result = "") {
-      removeThinking();
-      const card = document.createElement("article");
-      card.className = `tool-card${state.expandedAll ? " open" : ""}`;
-      const head = document.createElement("button");
-      head.className = "tool-head";
-      const icon = document.createElement("span");
-      icon.className = `tool-icon${status === "done" ? " done" : ""}`;
-      icon.textContent = status === "done" ? "✓" : "↯";
-      const title = document.createElement("span");
-      title.className = "tool-name";
-      title.textContent = name || "tool";
-      const stateLabel = document.createElement("span");
-      stateLabel.className = "tool-status";
-      stateLabel.textContent = status === "done" ? "done" : "running";
-      const chevron = document.createElement("span");
-      chevron.className = "chevron";
-      chevron.textContent = "▶";
-      head.append(icon, title, stateLabel, chevron);
-      const body = document.createElement("div");
-      body.className = "tool-body";
-      if (reasoning) appendToolSection(body, "Reasoning", reasoning, "reasoning");
-      appendToolSection(body, "Arguments", pretty(args), "arguments");
-      if (result) appendToolSection(body, "Result", result, "result");
-      head.addEventListener("click", () => card.classList.toggle("open"));
-      card.append(head, body);
-      toolStack().append(card);
-      state.toolCards.set(id, {card, icon, stateLabel, body, name});
-      updateToolSummary();
-      if (result) attachMedia(body, result, isSpeechTool(name));
-      scrollBottom();
-    }
-
-    function appendToolSection(parent, label, value, kind) {
-      const heading = document.createElement("div");
-      heading.className = "tool-label";
-      heading.textContent = label;
-      const content = document.createElement("pre");
-      content.dataset.kind = kind;
-      content.textContent = String(value ?? "");
-      parent.append(heading, content);
-    }
-
-    function completeTool(id, name, result) {
-      const record = state.toolCards.get(id);
-      if (!record) { addToolCard(id, name, {}, "", "done", result); return; }
-      record.icon.classList.add("done");
-      record.icon.textContent = "✓";
-      record.stateLabel.textContent = "done";
-      appendToolSection(record.body, "Result", result, "result");
-      attachMedia(record.body, result, isSpeechTool(name || record.name));
+    function showToolMedia(name, result) {
+      if (!extractMediaPaths(result).length) return;
+      const output = document.createElement("div");
+      currentContainer().append(output);
+      attachMedia(output, result, isSpeechTool(name));
       scrollBottom();
     }
 
@@ -864,14 +745,10 @@
         case "user_message":
           setProcessing(true, eventConversation || state.currentConversation || "pending");
           break;
-        case "thinking": updateThinking(data.content); break;
-        case "reasoning": addReasoning(data.content || ""); break;
-        case "tool_start":
-          addToolCard(data.id, data.name, data.args, data.reasoning || state.currentReasoning?.textContent || "");
-          state.currentReasoning?.remove(); state.currentReasoning = null;
-          addThinking("Working…");
-          break;
-        case "tool_complete": completeTool(data.id, data.name, data.result || ""); updateContext(data.context); addThinking("Thinking…"); break;
+        case "thinking": showWorking(); break;
+        case "reasoning": showWorking(); break;
+        case "tool_start": showWorking(); break;
+        case "tool_complete": showToolMedia(data.name, data.result || ""); updateContext(data.context); showWorking(); break;
         case "delta": streamDelta(data.content || ""); break;
         case "approval_required": addApproval(data); break;
         case "clarification_required": addClarification(data); break;
@@ -893,7 +770,7 @@
       if (!messages.length) { renderWelcome(); return; }
       messages.forEach(message => {
         if (message.role === "user") { startTurn(); addUserMessage(message.content || ""); }
-        else if (message.role === "tool") addToolCard(message.tool_id || crypto.randomUUID(), message.tool_name, message.tool_args || {}, message.reasoning || "", message.status || "done", message.tool_result || "");
+        else if (message.role === "tool") showToolMedia(message.tool_name, message.tool_result || "");
         else if (message.role === "assistant") addAssistantMessage(message.content || "");
       });
       scrollBottom(true);
