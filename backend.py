@@ -312,6 +312,7 @@ class LocalSession:
 
 session = LocalSession()
 remote_runtime_config: Dict[str, str] = {"provider": "", "model": ""}
+model_catalog_cache: Dict[str, tuple[float, list[str]]] = {}
 AIAgent = None
 get_model_context_length = None
 set_approval_callback = None
@@ -390,6 +391,50 @@ async def _remote_request(method: str, path: str) -> Response:
     return Response(upstream.content, status_code=upstream.status_code, headers=headers)
 
 
+def _agent_models_from_catalog(provider: str, rows: Any) -> list[str]:
+    models: list[str] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        model_id = str(row.get("id") or "").strip()
+        if not model_id:
+            continue
+        if provider == "ai-gateway":
+            if row.get("type") != "language" or "tool-use" not in (row.get("tags") or []):
+                continue
+        elif provider == "openrouter":
+            if "tools" not in (row.get("supported_parameters") or []):
+                continue
+        models.append(model_id)
+    return list(dict.fromkeys(models))
+
+
+def _public_agent_catalog(provider: str) -> list[str]:
+    """Fetch complete public catalogs, excluding models Hermes cannot use as an agent."""
+    cached = model_catalog_cache.get(provider)
+    if cached and time.time() - cached[0] < 300:
+        return list(cached[1])
+
+    urls = {
+        "ai-gateway": "https://ai-gateway.vercel.sh/v1/models",
+        "openrouter": "https://openrouter.ai/api/v1/models",
+    }
+    url = urls.get(provider)
+    if not url:
+        return []
+    try:
+        response = httpx.get(url, headers={"Accept": "application/json"}, timeout=10.0)
+        response.raise_for_status()
+        rows = response.json().get("data", [])
+    except (httpx.HTTPError, AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return []
+
+    models = _agent_models_from_catalog(provider, rows)
+    if models:
+        model_catalog_cache[provider] = (time.time(), models)
+    return models
+
+
 def _local_model_options() -> dict:
     from hermes_cli.inventory import build_models_payload, load_picker_context
 
@@ -398,7 +443,22 @@ def _local_model_options() -> dict:
         current_model=session.config.get("model"),
         current_base_url=session.config.get("base_url"),
     )
-    return build_models_payload(context, max_models=50)
+    payload = build_models_payload(context, max_models=1000)
+    for row in payload.get("providers", []):
+        provider = str(row.get("slug") or "")
+        existing = [str(model) for model in row.get("models", []) if model]
+        try:
+            discovered = _public_agent_catalog(provider)
+        except Exception:
+            discovered = []
+        models = list(dict.fromkeys([*discovered, *existing]))
+        current = str(payload.get("model") or "")
+        if row.get("is_current") and current and current not in models:
+            models.insert(0, current)
+        row["models"] = models
+        row["total_models"] = len(models)
+    payload["complete_catalog"] = True
+    return payload
 
 
 async def _remote_model_options() -> dict:
@@ -417,13 +477,16 @@ async def _remote_model_options() -> dict:
     model = remote_runtime_config.get("model", "")
     providers = []
     if provider:
+        models = await asyncio.to_thread(_public_agent_catalog, provider)
+        if model and model not in models:
+            models.insert(0, model)
         providers.append(
             {
                 "slug": provider,
                 "name": provider,
-                "models": [model] if model else [],
+                "models": models or ([model] if model else []),
                 "is_current": True,
-                "total_models": 1 if model else 0,
+                "total_models": len(models) if models else (1 if model else 0),
                 "source": "current-runtime",
             }
         )
@@ -487,7 +550,7 @@ async def health(request: Request):
 @app.get("/api/model/options")
 async def model_options(request: Request):
     _require_http_auth(request)
-    payload = await _remote_model_options() if REMOTE_URL else _local_model_options()
+    payload = await _remote_model_options() if REMOTE_URL else await asyncio.to_thread(_local_model_options)
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
 
 

@@ -61,6 +61,21 @@ class BackendUnitTests(unittest.TestCase):
         worker.join(timeout=1)
         self.assertEqual(result, ["once"])
 
+    def test_ai_gateway_catalog_only_keeps_agent_compatible_models(self):
+        rows = [
+            {"id": "openai/gpt-test", "type": "language", "tags": ["tool-use"]},
+            {"id": "image/model", "type": "image", "tags": []},
+            {"id": "chat/no-tools", "type": "language", "tags": []},
+        ]
+        self.assertEqual(backend._agent_models_from_catalog("ai-gateway", rows), ["openai/gpt-test"])
+
+    def test_openrouter_catalog_only_keeps_tool_models(self):
+        rows = [
+            {"id": "vendor/agent", "supported_parameters": ["tools", "temperature"]},
+            {"id": "vendor/chat", "supported_parameters": ["temperature"]},
+        ]
+        self.assertEqual(backend._agent_models_from_catalog("openrouter", rows), ["vendor/agent"])
+
 
 if __name__ == "__main__":
     unittest.main()
