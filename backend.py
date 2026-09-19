@@ -1,527 +1,753 @@
 #!/usr/bin/env python3
-"""Hermes Web UI — Backend with conversation persistence"""
+"""Hermes Web — local agent host or secure proxy to a remote Hermes Web host."""
+
+from __future__ import annotations
+
 import asyncio
+import base64
+import hmac
 import json
+import mimetypes
 import os
 import sys
 import threading
-import uuid
 import time
+import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
-
-# ── Hermes import ──────────────────────────────────
-HERMES_HOME = os.path.expanduser("~/.hermes/hermes-agent")
-sys.path.insert(0, HERMES_HOME)
-sys.path.insert(0, os.path.join(HERMES_HOME, "venv/lib/python3.*/site-packages"))
-
-for p in Path(HERMES_HOME, "venv").rglob("site-packages"):
-    if p.is_dir():
-        sys.path.insert(0, str(p))
-        break
-
-os.environ["HERMES_HOME"] = str(Path.home() / ".hermes")
-os.environ["HERMES_DISABLE_TELEMETRY"] = "1"
-
-from run_agent import AIAgent
-from agent.model_metadata import get_model_context_length
-
+import websockets
 import yaml
-
-# ── Context estimation ────────────────────────────
-def estimate_context_usage(messages, model_name="", base_url="", api_key="", provider=""):
-    """Estimate token usage using Hermes's context length resolution."""
-    total_chars = 0
-    tool_chars = 0
-    msg_count = 0
-    for m in messages:
-        content = m.get("content", "") or ""
-        if isinstance(content, str):
-            c = len(content)
-            total_chars += c
-            msg_count += 1
-            if m.get("role") == "tool":
-                tool_chars += c
-    # Mixed Chinese/English/code: ~3 chars per token
-    est_tokens = total_chars // 3
-
-    # Use Hermes's built-in context length resolution (带缓存到 session.conv_config["_ctx_limit"]）
-    limit = session.conv_config.get("_ctx_limit")
-    if limit is None:
-        limit = get_model_context_length(
-            model=model_name,
-            base_url=base_url or "",
-            api_key=api_key or "",
-            provider=provider or "",
-        )
-        session.conv_config["_ctx_limit"] = limit
-
-    pct = round(est_tokens / limit * 100, 1)
-    bar_len = 10
-    filled = round(pct / 100 * bar_len)
-    bar = "█" * filled + "░" * (bar_len - filled)
-
-    return {
-        "tokens": est_tokens,
-        "limit": limit,
-        "pct": pct,
-        "bar": bar,
-        "messages": msg_count,
-        "tool_kb": round(tool_chars / 1024, 0),
-    }
-
-import yaml
-
-# ── Config ─────────────────────────────────────────
-config_path = Path.home() / ".hermes" / "config.yaml"
-with open(config_path) as f:
-    config = yaml.safe_load(f)
-
-model_cfg = config.get("model", {})
-default_model = model_cfg.get("default", "deepseek-v4-flash")
-default_provider = model_cfg.get("provider", "deepseek")
-default_base_url = model_cfg.get("base_url", "")
-default_api_key = os.environ.get(model_cfg.get("env_key", "")) or ""
-
-# ── Conversation storage ───────────────────────────
-DATA_DIR = Path.home() / ".hermes" / "hermes-web"
-CONV_DIR = DATA_DIR / "conversations"
-CONV_DIR.mkdir(parents=True, exist_ok=True)
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 
-def load_conversations() -> List[dict]:
-    """List all conversations (summary only), sorted by create time desc."""
-    convs = []
-    for f in CONV_DIR.glob("*.json"):
-        try:
-            data = json.loads(f.read_text())
-            convs.append({
-                "id": data["id"],
-                "title": data.get("title", "新对话"),
-                "model": data.get("model", ""),
-                "provider": data.get("provider", ""),
-                "created_at": data.get("created_at", 0),
-                "updated_at": data.get("updated_at", 0),
-                "message_count": len(data.get("messages", [])),
-                "tokens": sum(len((m.get("content","") or "")) for m in data.get("messages",[])) // 3,
-                "has_agent": data["id"] in session.agents,
-            })
-        except Exception:
-            pass
-    convs.sort(key=lambda c: c["created_at"], reverse=True)
-    return convs
+APP_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = APP_DIR / "frontend"
+REMOTE_URL = os.getenv("HERMES_REMOTE_URL", "").strip().rstrip("/")
+REMOTE_TOKEN = os.getenv("HERMES_REMOTE_TOKEN", "").strip()
+AUTH_TOKEN = os.getenv("HERMES_WEB_TOKEN", "").strip()
+HOST = os.getenv("HERMES_WEB_HOST", "0.0.0.0")
+DEFAULT_PORT = int(os.getenv("HERMES_WEB_PORT", "3005"))
+MAX_CONVERSATIONS = int(os.getenv("HERMES_WEB_MAX_CONVERSATIONS", "100"))
+APPROVAL_TIMEOUT = int(os.getenv("HERMES_APPROVAL_TIMEOUT", "300"))
 
 
-def load_conversation(conv_id: str) -> Optional[dict]:
-    path = CONV_DIR / f"{conv_id}.json"
-    if path.exists():
-        return json.loads(path.read_text())
-    return None
-
-
-def save_conversation(data: dict):
-    path = CONV_DIR / f"{data['id']}.json"
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-
-
-def delete_conversation(conv_id: str):
-    path = CONV_DIR / f"{conv_id}.json"
-    if path.exists():
-        path.unlink()
-
-
-MAX_CONVERSATIONS = 100
-
-
-def create_conversation(model: str, provider: str) -> dict:
-    # 超过上限则删除最早的
-    convs = load_conversations()
-    if len(convs) >= MAX_CONVERSATIONS:
-        oldest = convs[-1]  # load_conversations 按 created_at 倒序，最后一个最老
-        delete_conversation(oldest["id"])
-    conv = {
-        "id": str(uuid.uuid4()),
-        "title": "新对话",
-        "model": model,
-        "provider": provider,
-        "created_at": time.time(),
-        "updated_at": time.time(),
-        "messages": [],
-    }
-    save_conversation(conv)
-    return conv
-
-
-def add_message(conv_id: str, role: str, content: str, extra: dict = None):
-    conv = load_conversation(conv_id)
-    if not conv:
+def _validate_remote_url() -> None:
+    if not REMOTE_URL:
         return
-    msg = {"role": role, "content": content, "timestamp": time.time()}
-    if extra:
-        msg.update(extra)
-    conv["messages"].append(msg)
-    conv["updated_at"] = time.time()
-    # Auto-title from first user message
-    if role == "user" and len(conv["messages"]) == 1:
-        title = content.strip()[:60]
-        if len(content.strip()) > 60:
-            title += "…"
-        conv["title"] = title
-    save_conversation(conv)
+    parsed = urlparse(REMOTE_URL)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise RuntimeError("HERMES_REMOTE_URL must be an http(s) URL with a hostname")
 
 
-def update_message(conv_id: str, tool_id: str, updates: dict):
-    """Update an existing message by tool_id (for tool status updates)."""
-    conv = load_conversation(conv_id)
-    if not conv:
-        return
-    for msg in conv["messages"]:
-        if msg.get("tool_id") == tool_id:
-            msg.update(updates)
-            msg["timestamp"] = time.time()
-            break
-    conv["updated_at"] = time.time()
-    save_conversation(conv)
+_validate_remote_url()
 
 
-# ── FastAPI app ────────────────────────────────────
-app = FastAPI(title="Hermes Web UI")
-
-
-# ── REST API for conversations ─────────────────────
-@app.get("/api/conversations")
-async def list_conversations():
-    from fastapi.responses import JSONResponse
-    return JSONResponse(
-        content=load_conversations(),
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+def _agent_home() -> Path:
+    configured = os.getenv("HERMES_AGENT_HOME", "").strip()
+    candidates = [
+        Path(configured).expanduser() if configured else None,
+        Path.home() / "hermes-agent",
+        Path.home() / ".hermes" / "hermes-agent",
+    ]
+    for candidate in candidates:
+        if candidate and (candidate / "run_agent.py").is_file():
+            return candidate.resolve()
+    searched = ", ".join(str(path) for path in candidates if path)
+    raise RuntimeError(
+        "Hermes Agent was not found. Set HERMES_AGENT_HOME or run in proxy mode with "
+        f"HERMES_REMOTE_URL. Searched: {searched}"
     )
 
 
-@app.get("/api/conversations/{conv_id}")
-async def get_conversation(conv_id: str):
-    conv = load_conversation(conv_id)
-    if not conv:
-        return {"error": "not found"}, 404
-    return conv
+def _load_local_runtime():
+    home = _agent_home()
+    sys.path.insert(0, str(home))
+    for path in (home / "venv").glob("lib/python*/site-packages"):
+        sys.path.insert(0, str(path))
+        break
+    os.environ.setdefault("HERMES_HOME", str(Path.home() / ".hermes"))
+    os.environ.setdefault("HERMES_DISABLE_TELEMETRY", "1")
+    from agent.model_metadata import get_model_context_length
+    from run_agent import AIAgent
+    from tools.terminal_tool import set_approval_callback
+
+    return AIAgent, get_model_context_length, set_approval_callback
 
 
-@app.delete("/api/conversations/{conv_id}")
-async def remove_conversation(conv_id: str):
-    delete_conversation(conv_id)
-    # 如果删的是当前对话，重置 session 状态
-    if session.conv_id == conv_id:
-        session.conv_id = None
+def _load_config() -> dict:
+    path = Path(os.getenv("HERMES_CONFIG", str(Path.home() / ".hermes" / "config.yaml"))).expanduser()
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+CONFIG = _load_config()
+MODEL_CONFIG = CONFIG.get("model", {}) if isinstance(CONFIG, dict) else {}
+DEFAULT_MODEL = MODEL_CONFIG.get("default", "")
+DEFAULT_PROVIDER = MODEL_CONFIG.get("provider", "")
+DEFAULT_BASE_URL = MODEL_CONFIG.get("base_url", "")
+DEFAULT_API_KEY = os.getenv(MODEL_CONFIG.get("env_key", ""), "") if MODEL_CONFIG.get("env_key") else ""
+
+DATA_DIR = Path(os.getenv("HERMES_WEB_DATA_DIR", str(Path.home() / ".hermes" / "hermes-web"))).expanduser()
+CONV_DIR = DATA_DIR / "conversations"
+if not REMOTE_URL:
+    CONV_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _active_agent_ids() -> set[str]:
+    current = globals().get("session")
+    return set(current.agents) if current else set()
+
+
+def load_conversations() -> List[dict]:
+    conversations: List[dict] = []
+    active_ids = _active_agent_ids()
+    for path in CONV_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            messages = data.get("messages", [])
+            conversations.append(
+                {
+                    "id": data["id"],
+                    "title": data.get("title", "New Chat"),
+                    "model": data.get("model", ""),
+                    "provider": data.get("provider", ""),
+                    "created_at": data.get("created_at", 0),
+                    "updated_at": data.get("updated_at", 0),
+                    "message_count": len(messages),
+                    "tokens": sum(len(str(message.get("content", "") or "")) for message in messages) // 3,
+                    "has_agent": data["id"] in active_ids,
+                }
+            )
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+    conversations.sort(key=lambda item: item["updated_at"], reverse=True)
+    return conversations
+
+
+def _valid_id(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def load_conversation(conversation_id: str) -> Optional[dict]:
+    if not _valid_id(conversation_id):
+        return None
+    path = CONV_DIR / f"{conversation_id}.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def save_conversation(data: dict) -> None:
+    path = CONV_DIR / f"{data['id']}.json"
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
+def delete_conversation(conversation_id: str) -> None:
+    if not _valid_id(conversation_id):
+        return
+    path = CONV_DIR / f"{conversation_id}.json"
+    if path.is_file():
+        path.unlink()
+
+
+def create_conversation(model: str, provider: str) -> dict:
+    conversations = load_conversations()
+    if len(conversations) >= MAX_CONVERSATIONS:
+        delete_conversation(conversations[-1]["id"])
+    now = time.time()
+    conversation = {
+        "id": str(uuid.uuid4()),
+        "title": "New Chat",
+        "model": model,
+        "provider": provider,
+        "created_at": now,
+        "updated_at": now,
+        "messages": [],
+    }
+    save_conversation(conversation)
+    return conversation
+
+
+def add_message(conversation_id: str, role: str, content: str, extra: Optional[dict] = None) -> None:
+    conversation = load_conversation(conversation_id)
+    if not conversation:
+        return
+    message = {"role": role, "content": content, "timestamp": time.time()}
+    if extra:
+        message.update(extra)
+    conversation["messages"].append(message)
+    conversation["updated_at"] = time.time()
+    if role == "user" and len(conversation["messages"]) == 1:
+        clean = " ".join(content.strip().split())
+        conversation["title"] = clean[:60] + ("…" if len(clean) > 60 else "")
+    save_conversation(conversation)
+
+
+def update_message(conversation_id: str, tool_id: str, updates: dict) -> None:
+    conversation = load_conversation(conversation_id)
+    if not conversation:
+        return
+    for message in conversation["messages"]:
+        if message.get("tool_id") == tool_id:
+            message.update(updates)
+            message["timestamp"] = time.time()
+            break
+    conversation["updated_at"] = time.time()
+    save_conversation(conversation)
+
+
+def _estimate_context(messages: list, config: dict) -> Optional[dict]:
+    resolver = globals().get("get_model_context_length")
+    if resolver is None:
+        return None
+    total_chars = 0
+    tool_chars = 0
+    message_count = 0
+    for message in messages:
+        content = message.get("content", "") or ""
+        if isinstance(content, str):
+            total_chars += len(content)
+            message_count += 1
+            if message.get("role") == "tool":
+                tool_chars += len(content)
+    estimated_tokens = total_chars // 3
+    limit = config.get("_ctx_limit")
+    if limit is None:
+        try:
+            limit = resolver(
+                model=config.get("model", ""),
+                base_url=config.get("base_url") or "",
+                api_key=config.get("api_key") or "",
+                provider=config.get("provider") or "",
+            )
+        except Exception:
+            return None
+        config["_ctx_limit"] = limit
+    percentage = round(estimated_tokens / max(limit, 1) * 100, 1)
+    return {
+        "tokens": estimated_tokens,
+        "limit": limit,
+        "pct": percentage,
+        "messages": message_count,
+        "tool_kb": round(tool_chars / 1024, 1),
+    }
+
+
+@dataclass
+class PendingInteraction:
+    event: threading.Event = field(default_factory=threading.Event)
+    response: Any = None
+
+
+class LocalSession:
+    def __init__(self) -> None:
+        self.ws: Optional[WebSocket] = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.conversation_id: Optional[str] = None
+        self.config = {
+            "model": DEFAULT_MODEL,
+            "provider": DEFAULT_PROVIDER,
+            "base_url": DEFAULT_BASE_URL or None,
+            "api_key": DEFAULT_API_KEY or None,
+            "max_iterations": 60,
+        }
+        self.reasoning: Dict[str, str] = {}
+        self.thinking: Dict[str, str] = {}
+        self.agents: Dict[str, Any] = {}
+        self.history: Dict[str, List[dict]] = {}
+        self.pending: Dict[str, PendingInteraction] = {}
+        self.stop_requested = False
+
+    async def send(self, event_type: str, **payload: Any) -> None:
+        if not self.ws:
+            return
+        try:
+            await self.ws.send_json({"type": event_type, **payload})
+        except (RuntimeError, WebSocketDisconnect):
+            return
+
+    def send_from_worker(self, event_type: str, **payload: Any) -> None:
+        if self.loop and not self.loop.is_closed():
+            asyncio.run_coroutine_threadsafe(self.send(event_type, **payload), self.loop)
+
+    def request_human(self, event_type: str, payload: dict, timeout: int = APPROVAL_TIMEOUT) -> Any:
+        request_id = str(uuid.uuid4())
+        pending = PendingInteraction()
+        self.pending[request_id] = pending
+        self.send_from_worker(event_type, request_id=request_id, **payload)
+        if not pending.event.wait(timeout):
+            self.pending.pop(request_id, None)
+            return "timeout"
+        self.pending.pop(request_id, None)
+        return pending.response
+
+    def resolve_human(self, request_id: str, response: Any) -> bool:
+        pending = self.pending.get(request_id)
+        if not pending:
+            return False
+        pending.response = response
+        pending.event.set()
+        return True
+
+    def cancel_pending(self) -> None:
+        for pending in self.pending.values():
+            pending.response = "cancelled"
+            pending.event.set()
+
+
+session = LocalSession()
+AIAgent = None
+get_model_context_length = None
+set_approval_callback = None
+if not REMOTE_URL:
+    AIAgent, get_model_context_length, set_approval_callback = _load_local_runtime()
+
+
+app = FastAPI(title="Hermes Web", docs_url=None, redoc_url=None)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=(self)"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+        "img-src 'self' data: blob:; media-src 'self' blob:; "
+        "connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'"
+    )
+    return response
+
+
+def _token_ok(candidate: str) -> bool:
+    return not AUTH_TOKEN or hmac.compare_digest(candidate, AUTH_TOKEN)
+
+
+def _require_http_auth(request: Request) -> None:
+    authorization = request.headers.get("authorization", "")
+    candidate = authorization[7:] if authorization.lower().startswith("bearer ") else ""
+    if not _token_ok(candidate):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def _require_ws_auth(websocket: WebSocket) -> bool:
+    candidate = ""
+    for protocol in websocket.headers.get("sec-websocket-protocol", "").split(","):
+        protocol = protocol.strip()
+        if not protocol.startswith("auth."):
+            continue
+        encoded = protocol.removeprefix("auth.")
+        try:
+            padding = "=" * (-len(encoded) % 4)
+            candidate = base64.urlsafe_b64decode(encoded + padding).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        break
+    return _token_ok(candidate)
+
+
+def _accepted_subprotocol(websocket: WebSocket) -> Optional[str]:
+    offered = {item.strip() for item in websocket.headers.get("sec-websocket-protocol", "").split(",")}
+    return "hermes" if "hermes" in offered else None
+
+
+def _origin_ok(websocket: WebSocket) -> bool:
+    origin = websocket.headers.get("origin")
+    host = websocket.headers.get("host", "")
+    if not origin:
+        return True
+    return urlparse(origin).netloc == host
+
+
+def _remote_headers() -> dict:
+    return {"Authorization": f"Bearer {REMOTE_TOKEN}"} if REMOTE_TOKEN else {}
+
+
+async def _remote_request(method: str, path: str) -> Response:
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+        upstream = await client.request(method, f"{REMOTE_URL}{path}", headers=_remote_headers())
+    excluded = {"content-length", "content-encoding", "transfer-encoding", "connection"}
+    headers = {key: value for key, value in upstream.headers.items() if key.lower() not in excluded}
+    return Response(upstream.content, status_code=upstream.status_code, headers=headers)
+
+
+@app.get("/api/health")
+async def health(request: Request):
+    _require_http_auth(request)
+    if not REMOTE_URL:
+        return {"ok": True, "mode": "local", "agent_home": str(_agent_home()), "version": 2}
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            response = await client.get(f"{REMOTE_URL}/api/conversations", headers=_remote_headers())
+            response.raise_for_status()
+        return {"ok": True, "mode": "proxy", "remote": urlparse(REMOTE_URL).hostname, "version": 2}
+    except Exception:
+        return JSONResponse({"ok": False, "mode": "proxy", "error": "Remote Hermes is unavailable"}, status_code=503)
+
+
+@app.get("/api/conversations")
+async def list_conversation_api(request: Request):
+    _require_http_auth(request)
+    if REMOTE_URL:
+        return await _remote_request("GET", "/api/conversations")
+    return JSONResponse(load_conversations(), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation_api(conversation_id: str, request: Request):
+    _require_http_auth(request)
+    if not _valid_id(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if REMOTE_URL:
+        return await _remote_request("GET", f"/api/conversations/{conversation_id}")
+    conversation = load_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation_api(conversation_id: str, request: Request):
+    _require_http_auth(request)
+    if not _valid_id(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if REMOTE_URL:
+        return await _remote_request("DELETE", f"/api/conversations/{conversation_id}")
+    delete_conversation(conversation_id)
+    session.agents.pop(conversation_id, None)
+    session.history.pop(conversation_id, None)
+    if session.conversation_id == conversation_id:
+        session.conversation_id = None
     return {"ok": True}
 
 
-# ── WebSocket chat ──────────────────────────────────
-class WsSession:
-    """持久化会话状态，跨 WebSocket 重连存活。"""
-    def __init__(self):
-        self.ws: WebSocket | None = None
-        self.loop: asyncio.AbstractEventLoop | None = None
-        self.conv_id: Optional[str] = None
-        self.conv_config: dict = {
-            "model": default_model,
-            "provider": default_provider,
-            "base_url": default_base_url or None,
-            "api_key": default_api_key or None,
-            "max_iterations": 60,
-        }
-        self.reasoning_text: Dict[str, str] = {}  # conv_id -> accumulated reasoning
-        self.thinking_text: Dict[str, str] = {}  # conv_id -> accumulated thinking
-        self.stop_requested: bool = False
-        self.agents: Dict[str, Any] = {}  # conv_id -> AIAgent
-        self.conv_history: Dict[str, List[Dict]] = {}  # conv_id -> messages
-        self.current_thread: threading.Thread | None = None
+def _media_roots() -> list[Path]:
+    raw = os.getenv("HERMES_MEDIA_ROOTS", str(Path.home() / ".hermes"))
+    return [Path(item.strip()).expanduser().resolve() for item in raw.split(os.pathsep) if item.strip()]
 
-    async def send_event(self, event_type: str, **kwargs):
-        """发事件到当前 WebSocket。"""
-        ws = self.ws
-        if ws is None:
-            return
+
+@app.get("/api/media")
+async def media(path: str, request: Request):
+    _require_http_auth(request)
+    if REMOTE_URL:
+        from urllib.parse import quote
+
+        return await _remote_request("GET", f"/api/media?path={quote(path, safe='')}")
+    candidate = Path(path).expanduser().resolve()
+    if not candidate.is_file() or not any(candidate.is_relative_to(root) for root in _media_roots()):
+        raise HTTPException(status_code=404, detail="Media not found")
+    media_type, _ = mimetypes.guess_type(candidate.name)
+    if not media_type or not media_type.startswith(("image/", "audio/", "video/")):
+        raise HTTPException(status_code=415, detail="Unsupported media type")
+    return FileResponse(candidate, media_type=media_type, filename=candidate.name)
+
+
+async def _proxy_websocket(websocket: WebSocket) -> None:
+    parsed = urlparse(REMOTE_URL)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    remote_ws = f"{scheme}://{parsed.netloc}{parsed.path.rstrip('/')}/ws/chat"
+    await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
+    try:
+        remote_protocols = ["hermes"]
+        if REMOTE_TOKEN:
+            encoded = base64.urlsafe_b64encode(REMOTE_TOKEN.encode("utf-8")).decode("ascii").rstrip("=")
+            remote_protocols.append(f"auth.{encoded}")
+        async with websockets.connect(
+            remote_ws,
+            max_size=16 * 1024 * 1024,
+            subprotocols=remote_protocols if REMOTE_TOKEN else None,
+        ) as upstream:
+            async def browser_to_remote():
+                while True:
+                    await upstream.send(await websocket.receive_text())
+
+            async def remote_to_browser():
+                async for message in upstream:
+                    # Older hermes-web versions included the resolved API key in
+                    # config events. Strip it at the bridge boundary.
+                    try:
+                        event = json.loads(message)
+                        if event.get("type") == "config_loaded":
+                            event.pop("api_key", None)
+                        message = json.dumps(event)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        pass
+                    await websocket.send_text(message)
+
+            tasks = [asyncio.create_task(browser_to_remote()), asyncio.create_task(remote_to_browser())]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
+    except (WebSocketDisconnect, websockets.ConnectionClosed):
+        return
+    except Exception:
         try:
-            await ws.send_json({"type": event_type, **kwargs})
+            await websocket.send_json({"type": "error", "message": "Remote Hermes connection failed"})
         except Exception:
             pass
 
 
-# 全局唯一 session，WS 重连不重置
-session = WsSession()
+def _make_callbacks(conversation_id: str):
+    def thinking(text: str):
+        session.thinking[conversation_id] = session.thinking.get(conversation_id, "") + text
+        session.send_from_worker("thinking", content=text, _conv_id=conversation_id)
+
+    def reasoning(text: str):
+        session.reasoning[conversation_id] = session.reasoning.get(conversation_id, "") + text
+        session.send_from_worker("reasoning", content=text, _conv_id=conversation_id)
+
+    def tool_start(tool_id: str, name: str, args: dict):
+        combined = "\n".join(
+            part.strip()
+            for part in (session.thinking.get(conversation_id, ""), session.reasoning.get(conversation_id, ""))
+            if part.strip()
+        )
+        session.thinking[conversation_id] = ""
+        session.reasoning[conversation_id] = ""
+        add_message(
+            conversation_id,
+            "tool",
+            "",
+            {
+                "tool_id": tool_id,
+                "tool_name": name,
+                "tool_args": args,
+                "tool_result": "",
+                "status": "running",
+                "reasoning": combined,
+            },
+        )
+        session.send_from_worker(
+            "tool_start", id=tool_id, name=name, args=args, reasoning=combined, _conv_id=conversation_id
+        )
+
+    def tool_complete(tool_id: str, name: str, args: dict, result: str):
+        result_text = str(result)
+        display_result = result_text[:12000] + ("\n… (truncated)" if len(result_text) > 12000 else "")
+        update_message(conversation_id, tool_id, {"tool_result": display_result, "status": "done"})
+        conversation = load_conversation(conversation_id)
+        context = _estimate_context(conversation.get("messages", []), session.config) if conversation else None
+        session.send_from_worker(
+            "tool_complete",
+            id=tool_id,
+            name=name,
+            result=display_result,
+            context=context,
+            _conv_id=conversation_id,
+        )
+
+    def stream_delta(delta: str):
+        if delta:
+            session.send_from_worker("delta", content=delta, _conv_id=conversation_id)
+
+    def clarify(question: str, choices: Any = None):
+        response = session.request_human(
+            "clarification_required",
+            {"question": question, "choices": choices or [], "_conv_id": conversation_id},
+        )
+        return "" if response in {None, "timeout", "cancelled"} else str(response)
+
+    return thinking, reasoning, tool_start, tool_complete, stream_delta, clarify
 
 
-@app.websocket("/ws/chat")
-async def chat_ws(ws: WebSocket):
-    await ws.accept()
-    # 更新 WS 引用 — 旧 agent 线程的 callback 会自动发到新连接
-    session.ws = ws
-    session.loop = asyncio.get_event_loop()
-    # 不自动创建对话，等用户发消息或点新建才创建
-    session.conv_id = None
+def _approval_callback(conversation_id: str):
+    def approve(command: str, description: str, **options: Any) -> str:
+        response = session.request_human(
+            "approval_required",
+            {
+                "command": command,
+                "description": description,
+                "allow_permanent": bool(options.get("allow_permanent", True)),
+                "allow_session": bool(options.get("allow_session", True)),
+                "title": options.get("title") or "Approval required",
+                "_conv_id": conversation_id,
+            },
+        )
+        allowed = {"once", "session", "always", "deny", "timeout", "cancelled"}
+        return response if response in allowed else "deny"
 
-    def make_callback(conv_id):
-        def on_thinking(text: str):
-            asyncio.run_coroutine_threadsafe(
-                session.send_event("thinking", content=text, _conv_id=conv_id), session.loop
-            )
-            session.thinking_text[conv_id] = session.thinking_text.get(conv_id, "") + text
+    return approve
 
-        def on_tool_start(tc_id: str, name: str, args: dict):
-            asyncio.run_coroutine_threadsafe(
-                session.send_event("tool_start", id=tc_id, name=name, args=args, _conv_id=conv_id), session.loop
-            )
-            # Persist tool start with accumulated reasoning
-            if conv_id:
-                reason_parts = []
-                if session.thinking_text.get(conv_id):
-                    reason_parts.append(session.thinking_text.get(conv_id, "").strip())
-                if session.reasoning_text.get(conv_id):
-                    reason_parts.append(session.reasoning_text.get(conv_id, "").strip())
-                full_reasoning = "\n".join(reason_parts)
-                session.reasoning_text[conv_id] = ""
-                session.thinking_text[conv_id] = ""
-                add_message(
-                    conv_id, "tool", "",
-                    extra={
-                        "tool_id": tc_id,
-                        "tool_name": name,
-                        "tool_args": args,
-                        "tool_result": "",
-                        "status": "running",
-                        "reasoning": full_reasoning,
-                    }
-                )
 
-        def on_tool_complete(tc_id: str, name: str, args: dict, result: str):
-            result_str = str(result)
-            if len(result_str) > 2000:
-                result_str = result_str[:2000] + "\n... (truncated)"
-            # Update persisted tool event first, then calc context
-            if conv_id:
-                update_message(conv_id, tc_id, {
-                    "tool_result": result_str,
-                    "status": "done",
-                })
-                # 每次工具完成重新计算上下文
-                conv = load_conversation(conv_id)
-                if conv:
-                    ctx = estimate_context_usage(
-                        conv.get("messages", []),
-                        model_name=session.conv_config["model"],
-                        base_url=session.conv_config.get("base_url", ""),
-                        api_key=session.conv_config.get("api_key", ""),
-                        provider=session.conv_config.get("provider", ""),
-                    )
-                else:
-                    ctx = None
-            else:
-                ctx = None
-            asyncio.run_coroutine_threadsafe(
-                session.send_event("tool_complete", id=tc_id, name=name, result=result_str, context=ctx, _conv_id=conv_id), session.loop
-            )
-
-        def on_stream_delta(delta: str):
-            if delta:
-                asyncio.run_coroutine_threadsafe(
-                    session.send_event("delta", content=delta, _conv_id=conv_id), session.loop
-                )
-
-        def on_reasoning(text: str):
-            asyncio.run_coroutine_threadsafe(
-                session.send_event("reasoning", content=text, _conv_id=conv_id), session.loop
-            )
-            session.reasoning_text[conv_id] = session.reasoning_text.get(conv_id, "") + text
-
-        return on_thinking, on_tool_start, on_tool_complete, on_stream_delta, on_reasoning
-
-    # Send initial config + conversation ID
-    await session.send_event("config_loaded", conv_id=session.conv_id, **session.conv_config)
+async def _local_websocket(websocket: WebSocket) -> None:
+    await websocket.accept(subprotocol=_accepted_subprotocol(websocket))
+    session.ws = websocket
+    session.loop = asyncio.get_running_loop()
+    session.conversation_id = None
+    await session.send("config_loaded", conv_id=None, **{k: v for k, v in session.config.items() if k != "api_key"})
 
     try:
         while True:
-            data = await ws.receive_json()
-            msg_type = data.get("type", "message")
+            data = await websocket.receive_json()
+            message_type = data.get("type", "message")
 
-            # ── Config update ──
-            if msg_type == "configure":
+            if message_type == "configure":
                 for key in ("model", "provider", "max_iterations"):
                     if key in data:
-                        session.conv_config[key] = data[key]
-                if "base_url" in data:
-                    session.conv_config["base_url"] = data["base_url"] or None
-                if "api_key" in data:
-                    session.conv_config["api_key"] = data["api_key"] or None
-                await session.send_event("config_loaded", conv_id=session.conv_id, **session.conv_config)
+                        session.config[key] = data[key]
+                session.config.pop("_ctx_limit", None)
+                await session.send(
+                    "config_loaded",
+                    conv_id=session.conversation_id,
+                    **{k: v for k, v in session.config.items() if k != "api_key"},
+                )
                 continue
 
-            # ── New chat ──
-            if msg_type == "new_chat":
-                session.conv_id = create_conversation(
-                    session.conv_config["model"], session.conv_config["provider"]
-                )["id"]
-                await session.send_event("config_loaded", conv_id=session.conv_id, **session.conv_config)
+            if message_type in {"approval_response", "clarification_response"}:
+                response = data.get("decision") if message_type == "approval_response" else data.get("response")
+                session.resolve_human(data.get("request_id", ""), response)
                 continue
 
-            # ── Switch to existing conversation ──
-            if msg_type == "switch_chat":
-                conv_id = data.get("conv_id", "")
-                conv = load_conversation(conv_id)
-                if conv:
-                    session.conv_id = conv_id
-                    # 上下文用量只跟实际 agent 实例绑定，没有 agent 就不显示
-                    has_agent = conv_id in session.agents
-                    if has_agent and session.conv_history.get(conv_id):
-                        ctx = estimate_context_usage(
-                            session.conv_history[conv_id],
-                            model_name=session.conv_config["model"],
-                            base_url=session.conv_config.get("base_url", ""),
-                            api_key=session.conv_config.get("api_key", ""),
-                            provider=session.conv_config.get("provider", ""),
-                        )
-                    else:
-                        ctx = None
-                    # 前端显示始终用保存的消息格式，不用 conv_history（含 system/tool_call 块）
-                    await session.send_event("load_conversation", messages=conv.get("messages", []), context=ctx, _conv_id=conv_id)
+            if message_type == "new_chat":
+                conversation = create_conversation(session.config["model"], session.config["provider"])
+                session.conversation_id = conversation["id"]
+                await session.send(
+                    "config_loaded",
+                    conv_id=session.conversation_id,
+                    **{k: v for k, v in session.config.items() if k != "api_key"},
+                )
                 continue
 
-            # ── Stop processing ──
-            if msg_type == "stop":
+            if message_type == "switch_chat":
+                conversation_id = data.get("conv_id", "")
+                conversation = load_conversation(conversation_id)
+                if conversation:
+                    session.conversation_id = conversation_id
+                    history = session.history.get(conversation_id)
+                    context = _estimate_context(history, session.config) if history else None
+                    await session.send(
+                        "load_conversation",
+                        messages=conversation.get("messages", []),
+                        context=context,
+                        _conv_id=conversation_id,
+                    )
+                continue
+
+            if message_type == "stop":
                 session.stop_requested = True
-                # 中断当前对话的 agent 执行（类似 TUI 的 /stop）
-                agent = session.agents.get(session.conv_id)
+                session.cancel_pending()
+                agent = session.agents.get(session.conversation_id or "")
                 if agent:
                     try:
                         agent.interrupt()
                     except Exception:
                         pass
-                await session.send_event("stopped", _conv_id=session.conv_id)
+                await session.send("stopped", _conv_id=session.conversation_id)
                 continue
 
-            # ── Chat message ──
-            message = data.get("message", "").strip()
+            message = str(data.get("message", "")).strip()
             if not message:
                 continue
-
-            # 如果没有对话，自动创建
-            if not session.conv_id:
-                conv = create_conversation(
-                    session.conv_config["model"], session.conv_config["provider"]
+            if not session.conversation_id:
+                conversation = create_conversation(session.config["model"], session.config["provider"])
+                session.conversation_id = conversation["id"]
+                await session.send(
+                    "config_loaded",
+                    conv_id=session.conversation_id,
+                    **{k: v for k, v in session.config.items() if k != "api_key"},
                 )
-                session.conv_id = conv["id"]
-                await session.send_event("config_loaded", conv_id=session.conv_id, **session.conv_config)
 
-            # Save user message
-            add_message(session.conv_id, "user", message)
+            conversation_id = session.conversation_id
+            add_message(conversation_id, "user", message)
+            await session.send("user_message", content=message, _conv_id=conversation_id)
 
-            await session.send_event("user_message", content=message, _conv_id=session.conv_id)
-
-            # 每个对话复用同一个 AIAgent，保持上下文
-            agent = session.agents.get(session.conv_id)
+            agent = session.agents.get(conversation_id)
             if agent is None:
-                conv_id_for_agent = session.conv_id
-                on_thinking, on_tool_start, on_tool_complete, on_stream_delta, on_reasoning = \
-                    make_callback(conv_id_for_agent)
-
+                thinking, reasoning, tool_start, tool_complete, stream_delta, clarify = _make_callbacks(conversation_id)
                 agent = AIAgent(
-                    model=session.conv_config["model"],
-                    provider=session.conv_config["provider"],
-                    base_url=session.conv_config["base_url"],
-                    api_key=session.conv_config["api_key"],
+                    model=session.config["model"],
+                    provider=session.config["provider"],
+                    base_url=session.config.get("base_url"),
+                    api_key=session.config.get("api_key"),
                     quiet_mode=True,
-                    tool_start_callback=on_tool_start,
-                    tool_complete_callback=on_tool_complete,
-                    stream_delta_callback=on_stream_delta,
-                    thinking_callback=on_thinking,
-                    reasoning_callback=on_reasoning,
-                    max_iterations=session.conv_config["max_iterations"],
+                    tool_start_callback=tool_start,
+                    tool_complete_callback=tool_complete,
+                    stream_delta_callback=stream_delta,
+                    thinking_callback=thinking,
+                    reasoning_callback=reasoning,
+                    clarify_callback=clarify,
+                    max_iterations=session.config["max_iterations"],
                 )
-                session.agents[session.conv_id] = agent
+                session.agents[conversation_id] = agent
 
-            def run(conv_id: str):
-                try:
-                    history = session.conv_history.get(conv_id)
-                    result = agent.run_conversation(
-                        message,
-                        conversation_history=history,
-                    )
-                    if session.stop_requested:
-                        return
-                    # 保存本轮完整消息列表，供下一轮作为历史
-                    session.conv_history[conv_id] = result.get("messages", [])
-                    final = result.get("final_response", "") or ""
-                    # Save assistant response
-                    add_message(conv_id, "assistant", final)
-                    # Clear reasoning for next round
-                    session.reasoning_text[conv_id] = ""
-                    session.thinking_text[conv_id] = ""
-                    # 计算上下文用量
-                    ctx = estimate_context_usage(
-                        session.conv_history[conv_id],
-                        model_name=session.conv_config["model"],
-                        base_url=session.conv_config.get("base_url", ""),
-                        api_key=session.conv_config.get("api_key", ""),
-                        provider=session.conv_config.get("provider", ""),
-                    )
-                    asyncio.run_coroutine_threadsafe(
-                        session.send_event("done", content=final, context=ctx, _conv_id=conv_id_for_thread), session.loop
-                    )
-                except Exception as e:
-                    if session.stop_requested:
-                        return
-                    asyncio.run_coroutine_threadsafe(
-                        session.send_event("error", message=str(e), _conv_id=conv_id_for_thread), session.loop
-                    )
-
-            conv_id_for_thread = session.conv_id
             session.stop_requested = False
-            thread = threading.Thread(target=run, args=(conv_id_for_thread,), daemon=True)
-            session.current_thread = thread
-            thread.start()
 
-            # 不阻塞主循环 — 后台监视线程完成，主循环继续接收消息
-            async def _wait_thread():
-                while thread.is_alive() and not session.stop_requested:
-                    await asyncio.sleep(0.1)
-                if not session.stop_requested:
-                    await session.send_event("end", _conv_id=conv_id_for_thread)
+            def run_agent_turn(turn_agent=agent, turn_message=message, turn_conversation_id=conversation_id) -> None:
+                try:
+                    set_approval_callback(_approval_callback(turn_conversation_id))
+                    result = turn_agent.run_conversation(
+                        turn_message, conversation_history=session.history.get(turn_conversation_id)
+                    )
+                    if session.stop_requested:
+                        return
+                    session.history[turn_conversation_id] = result.get("messages", [])
+                    final = result.get("final_response", "") or ""
+                    add_message(turn_conversation_id, "assistant", final)
+                    session.reasoning[turn_conversation_id] = ""
+                    session.thinking[turn_conversation_id] = ""
+                    context = _estimate_context(session.history[turn_conversation_id], session.config)
+                    session.send_from_worker("done", content=final, context=context, _conv_id=turn_conversation_id)
+                except Exception as error:
+                    if not session.stop_requested:
+                        session.send_from_worker("error", message=str(error), _conv_id=turn_conversation_id)
+                finally:
+                    set_approval_callback(None)
+                    session.send_from_worker("end", _conv_id=turn_conversation_id)
 
-            asyncio.create_task(_wait_thread())
-
+            threading.Thread(target=run_agent_turn, daemon=True).start()
     except WebSocketDisconnect:
-        # WS 断开不杀线程 — 重连后续上
-        pass
-    except Exception as e:
-        try:
-            await session.send_event("error", message=str(e))
-        except Exception:
-            pass
+        return
+    finally:
+        if session.ws is websocket:
+            session.ws = None
 
 
-# ── Static files ────────────────────────────────────
-FRONTEND_DIR = Path(__file__).parent / "frontend"
-FRONTEND_DIR.mkdir(exist_ok=True)
+@app.websocket("/ws/chat")
+async def chat_websocket(websocket: WebSocket):
+    if not _require_ws_auth(websocket) or not _origin_ok(websocket):
+        await websocket.close(code=1008)
+        return
+    if REMOTE_URL:
+        await _proxy_websocket(websocket)
+    else:
+        await _local_websocket(websocket)
 
 
 @app.get("/")
 async def index():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/{path:path}")
 async def static_files(path: str):
-    file = FRONTEND_DIR / path
-    if file.exists() and file.is_file():
-        return FileResponse(str(file))
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    candidate = (FRONTEND_DIR / path).resolve()
+    if candidate.is_relative_to(FRONTEND_DIR.resolve()) and candidate.is_file():
+        return FileResponse(candidate)
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
-# ── Main ────────────────────────────────────────────
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 3005
-    print(f"\n  Hermes Web UI → http://0.0.0.0:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
+    mode = f"proxy → {urlparse(REMOTE_URL).hostname}" if REMOTE_URL else "local agent"
+    print(f"Hermes Web ({mode}) → http://{HOST}:{port}")
+    uvicorn.run(app, host=HOST, port=port, log_level=os.getenv("HERMES_LOG_LEVEL", "info"))

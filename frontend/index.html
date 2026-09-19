@@ -1,1679 +1,1067 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
+<!doctype html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hermes Agent</title>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<style>
-  :root {
-    --bg: #ffffff;
-    --bg-sidebar: #ffffff;
-    --bg-hover: #f5f5f5;
-    --bg-input: #ffffff;
-    --bg-user: #f0f0f0;
-    --bg-code: #f9fafb;
-    --border: #e8e8e8;
-    --text: #000000;
-    --text-secondary: #555555;
-    --text-muted: #9ca3af;
-    --accent: #7c3aed;
-    --accent-hover: #8b5cf6;
-    --accent-light: #a78bfa;
-    --green: #22c55e;
-    --orange: #f59e0b;
-    --red: #ef4444;
-    --radius: 10px;
-    --radius-lg: 16px;
-    --radius-sm: 6px;
-    --font: -apple-system, BlinkMacSystemFont, Inter, Vazirmatn, ui-sans-serif, system-ui, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans SC", "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    --sidebar-width: 260px;
-  }
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Hermes</title>
+  <style>
+    :root {
+      --bg: #070707;
+      --panel: #0d0d0e;
+      --panel-2: #121214;
+      --panel-3: #18181b;
+      --hover: #1d1d20;
+      --line: #29292d;
+      --line-soft: #1b1b1e;
+      --text: #f2f2f3;
+      --muted: #96969e;
+      --faint: #66666f;
+      --accent: #f3f3f3;
+      --accent-ink: #080808;
+      --green: #4ade80;
+      --amber: #fbbf24;
+      --red: #fb7185;
+      --blue: #60a5fa;
+      --sidebar: 278px;
+      --content: 780px;
+      --radius: 12px;
+      --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    height: 100%;
-    height: 100dvh;
-    margin: 0;
-  }
-  body {
-    font-family: var(--font);
-    background: var(--bg);
-    color: var(--text);
-    display: flex;
-    overflow: hidden;
-  }
-
-  .sidebar {
-    width: var(--sidebar-width);
-    background: var(--bg-sidebar);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-  .sidebar-header {
-    padding: 12px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    border-bottom: 1px solid var(--border);
-  }
-  .sidebar-logo {
-    width: 28px; height: 28px;
-    background: #000;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    color: #fff;
-    font-weight: 700;
-  }
-  .sidebar-title { font-size: 14px; font-weight: 600; flex: 1; }
-
-  .sidebar-close-btn {
-    display: none;
-    width: 26px; height: 26px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-radius: 6px;
-    font-size: 14px;
-    line-height: 26px;
-    text-align: center;
-  }
-  .sidebar-close-btn:hover { background: var(--bg-hover); color: var(--text); }
-
-  .new-chat-btn {
-    margin: 10px 12px;
-    padding: 8px 12px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    font-family: var(--font);
-    transition: background 0.15s;
-  }
-  .new-chat-btn:hover { background: var(--bg-hover); }
-  .new-chat-btn .icon { font-size: 16px; }
-
-  .sidebar-history {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 8px;
-  }
-  .sidebar-history::-webkit-scrollbar { width: 4px; }
-  .sidebar-history::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-  .conv-item {
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: background 0.15s;
-    display: flex;
-    flex-direction: row;
-    margin-bottom: 2px;
-    position: relative;
-  }
-  .conv-item:hover { background: var(--bg-hover); }
-  .conv-item.active { background: #f3f0ff; }
-  .conv-body {
-    flex: 1;
-    min-width: 0;
-  }
-  .conv-text {
-    flex: 1;
-    min-width: 0;
-  }
-  .conv-title-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .conv-title {
-    font-size: 13px;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .agent-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #22c55e;
-    flex-shrink: 0;
-  }
-  .agent-dot.hidden {
-    visibility: hidden;
-  }
-  .conv-item .conv-meta {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 2px;
-    padding-left: 13px;
-  }
-  .conv-item .conv-delete {
-    display: none;
-    position: absolute;
-    right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 20px; height: 20px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 12px;
-    line-height: 20px;
-    text-align: center;
-  }
-  .conv-item:hover .conv-delete { display: block; }
-  .conv-item .conv-delete:hover { color: var(--red); background: var(--bg-hover); }
-  .sidebar-history::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-  .main-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    padding: 10px 20px;
-    border-bottom: 1px solid var(--border);
-    gap: 12px;
-    flex-shrink: 0;
-    background: var(--bg);
-  }
-  .header h1 { font-size: 14px; font-weight: 500; color: var(--text-secondary); }
-  .header-right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
-  .hermes-badge {
-    font-size: 11px;
-    color: var(--text-muted);
-    background: var(--bg-hover);
-    padding: 2px 7px;
-    border-radius: 4px;
-    font-weight: 500;
-  }
-  .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-  .status-text { font-size: 12px; color: var(--text-muted); }
-  .btn-icon {
-    width: 30px; height: 30px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    transition: background 0.15s;
-  }
-  .btn-icon:hover { background: var(--bg-hover); color: var(--text); }
-
-  .chat-area {
-    flex: 1;
-    overflow-y: auto;
-    scroll-behavior: smooth;
-    position: relative;
-  }
-  .chat-area::-webkit-scrollbar { width: 6px; }
-  .chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-  .scroll-top-btn {
-    position: fixed;
-    bottom: 80px;
-    right: 30px;
-    width: 44px; height: 44px;
-    border-radius: 50%;
-    background: #fff;
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    font-size: 24px;
-    font-weight: 700;
-    cursor: pointer;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    transition: all 0.2s;
-    z-index: 100;
-  }
-  .scroll-top-btn:hover {
-    background: var(--bg-hover);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-  }
-  .scroll-top-btn.show { display: flex; }
-
-  .chat-container {
-    max-width: 800px;
-    margin: 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    padding-top: 30px;
-  }
-
-  .welcome {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: calc(100vh - 200px);
-    min-height: calc(100dvh - 200px);
-    gap: 20px;
-    text-align: center;
-    padding: 40px 20px;
-  }
-  .welcome h2 { font-size: 20px; font-weight: 600; }
-  .welcome p { font-size: 14px; color: var(--text-secondary); max-width: 500px; line-height: 1.6; }
-  /* ── 消息 ── */
-  .message {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 0 20px;
-    width: 100%;
-    animation: fadeIn 0.3s ease;
-  }
-  .message.user {
-    align-items: flex-end;
-  }
-  .message + .message {
-    margin-top: 6px;
-  }
-  /* ── 轮次容器 ── */
-  .turn {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-  }
-  .turn + .turn {
-    border-top: 1px solid var(--border);
-    margin-top: 20px;
-    padding-top: 8px;
-  }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .message .avatar {
-    display: inline-flex;
-    width: 28px; height: 28px;
-    border-radius: 8px;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    background: #fff;
-    color: #000;
-    border: 1px solid #e8e8e8;
-    margin-right: 8px;
-  }
-  .message.user .avatar { display: none; }
-
-  .message .bubble {
-    font-size: 16px;
-    line-height: 1.6;
-    word-wrap: break-word;
-  }
-  .message.user .bubble {
-    background: #f4f4f4;
-    border-radius: 24px;
-    padding: 6px 16px;
-    max-width: 80%;
-    color: #333;
-  }
-  .message.assistant .bubble {
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    box-shadow: none;
-    width: 100%;
-    color: #333;
-  }
-  .message.assistant {
-    margin-top: 10px;
-  }
-
-  .msg-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
-    font-size: 13px;
-  }
-  .msg-author {
-    font-weight: 600;
-    color: #111;
-  }
-  .msg-time {
-    color: #999;
-    font-size: 12px;
-    display: none;
-  }
-  .msg-header:hover .msg-time {
-    display: inline;
-  }
-
-  .bubble-content {
-    font-size: 16px;
-    line-height: 1.7;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-    color: #333;
-  }
-  .bubble-content p { margin: 10px 0; }
-  .bubble-content p:first-child { margin-top: 0; }
-  .bubble-content p:last-child { margin-bottom: 0; }
-  .bubble-content ul, .bubble-content ol { padding-left: 22px; margin: 10px 0; }
-  .bubble-content li { margin: 4px 0; line-height: 1.7; }
-  .bubble-content li > p { margin: 4px 0; }
-  .bubble-content h1 { font-size: 20px; margin: 20px 0 10px; font-weight: 700; }
-  .bubble-content h2 { font-size: 18px; margin: 18px 0 8px; font-weight: 700; }
-  .bubble-content h3 { font-size: 16px; margin: 14px 0 6px; font-weight: 600; }
-  .bubble-content h4 { font-size: 15px; margin: 12px 0 6px; font-weight: 600; }
-  .bubble-content blockquote {
-    border-left: 3px solid var(--accent);
-    margin: 10px 0;
-    padding: 4px 12px;
-    color: #666;
-    background: #fafafa;
-    border-radius: 0 4px 4px 0;
-  }
-  .bubble-content blockquote p { margin: 4px 0; }
-  .bubble-content pre {
-    background: #f5f5f5;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 16px;
-    overflow-x: auto;
-    font-family: var(--mono);
-    font-size: 13px;
-    line-height: 1.6;
-    margin: 12px 0;
-  }
-  .bubble-content code {
-    font-family: var(--mono);
-    font-size: 13px;
-    background: #f0f0f0;
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-  .bubble-content pre code {
-    padding: 0;
-    background: none;
-    font-size: 13px;
-    line-height: 1.6;
-  }
-  .bubble-content strong { font-weight: 600; }
-  .bubble-content hr {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 18px 0;
-  }
-  .bubble-content table {
-    border-collapse: collapse;
-    margin: 12px 0;
-    font-size: 14px;
-    width: 100%;
-  }
-  .bubble-content th, .bubble-content td {
-    border: 1px solid var(--border);
-    padding: 8px 12px;
-    text-align: left;
-  }
-  .bubble-content th {
-    background: #f5f5f5;
-    font-weight: 600;
-  }
-  .bubble-content img { max-width: 100%; border-radius: 8px; margin: 10px 0; }
-  .bubble-content a { color: var(--accent); text-decoration: underline; }
-
-  .thinking-indicator {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 4px 20px;
-    max-width: 800px;
-    margin: 0 auto;
-    width: 100%;
-    font-size: 13px;
-    color: var(--text-secondary);
-    animation: fadeIn 0.3s ease;
-  }
-  .thinking-dots { display: flex; gap: 4px; }
-  .thinking-dots span {
-    width: 5px; height: 5px; border-radius: 50%;
-    background: var(--accent);
-    animation: bounce 1.4s ease infinite;
-  }
-  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes bounce {
-    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-    40% { transform: scale(1); opacity: 1; }
-  }
-  .thinking-text { font-size: 12px; color: var(--text-muted); }
-
-  .tool-card {
-    max-width: 800px;
-    margin: 4px auto;
-    width: calc(100% - 40px);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    animation: fadeIn 0.3s ease;
-  }
-  .tool-card-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 12px;
-    transition: background 0.15s;
-  }
-  .tool-card-header:hover { background: var(--bg-hover); }
-  .tool-icon {
-    width: 18px; height: 18px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    flex-shrink: 0;
-  }
-  .tool-icon.running { background: #fef3c7; color: var(--orange); }
-  .tool-icon.done { background: #dcfce7; color: var(--green); }
-  .tool-name { font-weight: 500; color: var(--accent); }
-  .tool-status { margin-left: auto; font-size: 11px; color: var(--text-muted); }
-  .tool-chevron { color: var(--text-muted); font-size: 9px; transition: transform 0.2s; }
-  .tool-chevron.open { transform: rotate(90deg); }
-  .tool-card-body { display: none; border-top: 1px solid var(--border); padding: 8px 10px; font-size: 12px; }
-  .tool-card-body.open { display: block; }
-  .tool-card-body .label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; margin-bottom: 4px; }
-  .tool-card-body pre {
-    background: var(--bg-code);
-    border-radius: 4px;
-    padding: 6px 8px;
-    overflow-x: auto;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--text-secondary);
-    margin-bottom: 6px;
-  }
-  .tool-card-body pre:last-child { margin-bottom: 0; }
-  .tool-reasoning {
-    background: #f3e8ff;
-    border: 1px solid #e9d5ff;
-    border-radius: 4px;
-    padding: 8px 10px;
-    font-size: 12px;
-    line-height: 1.6;
-    color: #7c3aed;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    margin-bottom: 6px;
-  }
-  .tools-toggle-bar {
-    max-width: 800px;
-    margin: 10px auto 2px;
-    width: calc(100% - 40px);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: #fafafa;
-    font-size: 12px;
-    color: var(--text-secondary);
-    animation: fadeIn 0.3s ease;
-  }
-  .tools-toggle-bar .tools-count { color: var(--text-muted); font-size: 11px; }
-  .tools-toggle-btn {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-family: var(--font);
-    color: var(--text);
-    cursor: pointer;
-    transition: background 0.15s;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .tools-toggle-btn:hover { background: var(--bg-hover); }
-
-  .reasoning-block {
-    max-width: 800px;
-    margin: 4px auto;
-    width: calc(100% - 40px);
-    padding: 8px 12px;
-    background: #f3e8ff;
-    border: 1px solid #e9d5ff;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    font-style: italic;
-    color: #7c3aed;
-    white-space: pre-wrap;
-  }
-
-  .streaming-cursor::after {
-    content: "▊";
-    animation: blink 1s step-end infinite;
-    color: var(--accent);
-    font-size: 14px;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
-
-  .error-msg {
-    max-width: 800px;
-    margin: 4px auto;
-    width: calc(100% - 40px);
-    padding: 8px 12px;
-    border: 1px solid #fca5a5;
-    border-radius: var(--radius-sm);
-    color: var(--red);
-    font-size: 13px;
-  }
-
-  .input-area {
-    padding: 12px 20px 20px;
-    flex-shrink: 0;
-  }
-
-  .context-usage {
-    max-width: 800px;
-    margin: 0 auto 4px;
-    padding: 2px 17px;
-    font-size: 13px;
-    color: #555;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: var(--mono);
-    font-weight: 600;
-  }
-  .context-usage .ctx-bar {
-    width: 40px;
-    height: 4px;
-    background: #e8e8e8;
-    border-radius: 2px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .context-usage .ctx-bar-fill {
-    height: 100%;
-    background: #000;
-    border-radius: 2px;
-    transition: width 0.4s ease;
-  }
-  .context-usage .ctx-text { white-space: nowrap; color: #666; }
-
-  .input-container { max-width: 800px; margin: 0 auto; }
-  .input-wrapper {
-    display: flex;
-    align-items: flex-end;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 4px 4px 4px 16px;
-    transition: border-color 0.2s;
-  }
-  .input-wrapper:focus-within { border-color: var(--accent); }
-  .input-wrapper textarea {
-    flex: 1;
-    background: none;
-    border: none;
-    outline: none;
-    color: var(--text);
-    font-family: var(--font);
-    font-size: 14px;
-    padding: 8px 8px;
-    resize: none;
-    min-height: 24px;
-    max-height: 200px;
-    line-height: 1.5;
-  }
-  .input-wrapper textarea::placeholder { color: var(--text-muted); }
-  .send-btn {
-    width: 34px; height: 34px;
-    border: none;
-    border-radius: 8px;
-    background: #000;
-    color: #fff;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-    transition: background 0.15s, opacity 0.15s;
-    flex-shrink: 0;
-  }
-  .send-btn:hover { background: #333; }
-  .send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-
-  .modal-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.3);
-    z-index: 1000;
-    align-items: center;
-    justify-content: center;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 480px;
-    max-width: 90vw;
-    max-height: 85vh;
-    overflow-y: auto;
-    padding: 24px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.1);
-  }
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-  }
-  .modal-header h2 { font-size: 17px; font-weight: 600; }
-  .modal-close {
-    width: 28px; height: 28px;
-    border: none;
-    background: var(--bg-hover);
-    color: var(--text-secondary);
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .form-group { margin-bottom: 16px; }
-  .form-group label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
-  .form-group input, .form-group select {
-    width: 100%;
-    padding: 8px 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    font-size: 14px;
-    font-family: var(--font);
-    outline: none;
-  }
-  .form-group input:focus, .form-group select:focus { border-color: var(--accent); }
-  .form-group .hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-  .form-row { display: flex; gap: 12px; }
-  .form-row .form-group { flex: 1; }
-  .modal-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-  }
-  .btn {
-    padding: 8px 16px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    font-family: var(--font);
-    transition: background 0.15s;
-  }
-  .btn-primary { background: #000; color: #fff; border-color: #000; }
-  .btn-primary:hover { background: #333; }
-  .btn-secondary { background: transparent; color: var(--text-secondary); }
-  .btn-secondary:hover { background: var(--bg-hover); color: var(--text); }
-  .save-status { font-size: 12px; color: var(--green); opacity: 0; transition: opacity 0.3s; align-self: center; margin-right: auto; }
-  .save-status.show { opacity: 1; }
-  .api-key-warning { font-size: 11px; color: var(--orange); margin-top: 4px; }
-
-  .section-divider {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    padding: 12px 0 8px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 12px;
-  }
-
-  /* ── 开关 (Toggle Switch) ── */
-  .toggle-switch {
-    position: relative;
-    display: inline-flex;
-    width: 36px;
-    height: 20px;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .toggle-switch input { opacity: 0; width: 0; height: 0; }
-  .toggle-slider {
-    position: absolute;
-    inset: 0;
-    background: #ccc;
-    border-radius: 20px;
-    transition: background 0.2s;
-  }
-  .toggle-slider::before {
-    content: "";
-    position: absolute;
-    width: 16px; height: 16px;
-    left: 2px; top: 2px;
-    background: #fff;
-    border-radius: 50%;
-    transition: transform 0.2s;
-  }
-  .toggle-switch input:checked + .toggle-slider { background: #000; }
-  .toggle-switch input:checked + .toggle-slider::before { transform: translateX(16px); }
-
-  /* ── 删除确认弹窗 ── */
-  .confirm-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.3);
-    z-index: 1100;
-    align-items: center;
-    justify-content: center;
-  }
-  .confirm-overlay.open { display: flex; }
-  .confirm-dialog {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 340px;
-    max-width: 90vw;
-    padding: 16px 24px 24px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.15);
-    text-align: center;
-  }
-  .confirm-dialog h3 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 16px;
-  }
-  .confirm-dialog p {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-bottom: 20px;
-  }
-  .confirm-dialog .confirm-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-  }
-  .confirm-dialog .btn {
-    min-width: 80px;
-    padding: 8px 20px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    font-family: var(--font);
-    transition: background 0.15s;
-  }
-  .confirm-dialog .btn-cancel { background: transparent; color: var(--text-secondary); }
-  .confirm-dialog .btn-cancel:hover { background: var(--bg-hover); }
-  .confirm-dialog .btn-danger { background: var(--red); color: #fff; border-color: var(--red); }
-  .confirm-dialog .btn-danger:hover { background: #dc2626; }
-
-  /* ── 汉堡按钮 ── */
-  .hamburger-btn {
-    display: none;
-    width: 30px; height: 30px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    transition: background 0.15s;
-    flex-shrink: 0;
-  }
-  .hamburger-btn:hover { background: var(--bg-hover); }
-
-  /* ── 移动端侧栏遮罩 ── */
-  .sidebar-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.35);
-    z-index: 150;
-    backdrop-filter: blur(2px);
-  }
-  .sidebar-overlay.show { display: block; }
-
-  /* ── 移动端适配 ── */
-  @media (max-width: 768px) {
-    .hamburger-btn { display: flex; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+    button, textarea, input, select { font: inherit; }
+    button { color: inherit; }
+    :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+    .app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); height: 100dvh; }
 
     .sidebar {
-      position: fixed;
-      left: -280px; top: 0; bottom: 0;
-      z-index: 200;
-      transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 4px 0 24px rgba(0,0,0,0.08);
+      min-width: 0; background: #0a0a0b; border-right: 1px solid var(--line-soft);
+      display: flex; flex-direction: column; z-index: 40;
     }
-    .sidebar.mobile-open { left: 0; }
-    .sidebar-close-btn { display: inline-flex; align-items: center; justify-content: center; }
-
-    .main-area { width: 100%; }
-
-    .header { padding: 8px 10px; gap: 8px; }
-    .header h1 { font-size: 13px; }
-    .hermes-badge { display: none; }
-    .status-text { font-size: 11px; }
-
-    .chat-container { padding-top: 16px; }
-
-    .message { padding: 0 10px; }
-    .message .bubble { font-size: 15px; }
-    .message.user .bubble {
-      max-width: 90%;
-      font-size: 15px;
-      padding: 6px 14px;
+    .brand { height: 58px; padding: 0 14px; display: flex; align-items: center; gap: 10px; }
+    .mark {
+      width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+      background: var(--text); color: var(--bg); font-weight: 900; font-size: 13px; letter-spacing: -.05em;
     }
-    .message.assistant .bubble { font-size: 15px; }
-    .bubble-content { font-size: 15px; }
-    .bubble-content h1 { font-size: 18px; }
-    .bubble-content h2 { font-size: 16px; }
-    .bubble-content h3 { font-size: 15px; }
-    .bubble-content pre {
-      font-size: 12px;
-      padding: 10px 12px;
+    .brand-copy { min-width: 0; flex: 1; }
+    .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
+    .brand-sub { font-size: 10px; color: var(--faint); margin-top: 1px; }
+    .icon-btn {
+      width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 9px;
+      background: transparent; color: var(--muted); cursor: pointer;
     }
-
-    .thinking-indicator { padding: 4px 10px; }
-    .reasoning-block { width: calc(100% - 20px); font-size: 12px; padding: 6px 10px; }
-    .error-msg { width: calc(100% - 20px); }
-
-    .tool-card { width: calc(100% - 20px); }
-    .tool-card-body pre { font-size: 10px; }
-    .tools-toggle-bar { width: calc(100% - 20px); }
-
-    .input-area { padding: 8px 10px 14px; }
-    .input-wrapper { padding: 3px 3px 3px 12px; }
-    .input-wrapper textarea { font-size: 15px; min-height: 22px; }
-    .send-btn { width: 36px; height: 36px; font-size: 16px; }
-
-    .scroll-top-btn {
-      bottom: 72px;
-      right: 14px;
-      width: 40px; height: 40px;
-      font-size: 20px;
+    .icon-btn:hover { background: var(--hover); color: var(--text); }
+    .new-chat {
+      margin: 4px 10px 12px; height: 39px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--panel-2); display: flex; align-items: center; justify-content: center; gap: 8px;
+      cursor: pointer; font-size: 12px; font-weight: 650;
     }
+    .new-chat:hover { background: var(--hover); border-color: #3b3b40; }
+    .section-label { padding: 4px 16px 7px; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .history { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+    .history::-webkit-scrollbar, .chat::-webkit-scrollbar { width: 5px; }
+    .history::-webkit-scrollbar-thumb, .chat::-webkit-scrollbar-thumb { background: #29292d; border-radius: 4px; }
+    .conversation {
+      width: 100%; border: 0; border-radius: 9px; background: transparent; text-align: left; padding: 9px 10px;
+      display: grid; grid-template-columns: minmax(0, 1fr) 24px; gap: 6px; color: var(--muted);
+    }
+    .conversation:hover { background: var(--hover); color: var(--text); }
+    .conversation.active { background: #202023; color: var(--text); }
+    .conversation-open { min-width: 0; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+    .conversation-title { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .conversation-meta { color: var(--faint); font-size: 10px; margin-top: 3px; }
+    .conversation-delete { border: 0; background: transparent; color: transparent; border-radius: 6px; cursor: pointer; }
+    .conversation:hover .conversation-delete { color: var(--faint); }
+    .conversation-delete:hover { color: var(--red) !important; background: #2a171c; }
+    .sidebar-foot { padding: 10px; border-top: 1px solid var(--line-soft); }
+    .server-chip { display: flex; align-items: center; gap: 8px; padding: 8px 9px; color: var(--muted); font-size: 11px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px rgba(251,113,133,.08); }
+    .dot.online { background: var(--green); box-shadow: 0 0 0 3px rgba(74,222,128,.08); }
 
-    .modal { padding: 16px; }
-    .form-row { flex-direction: column; gap: 0; }
+    .main { min-width: 0; display: grid; grid-template-rows: 58px minmax(0, 1fr) auto; background: var(--bg); }
+    .topbar { border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; padding: 0 18px; gap: 12px; }
+    .menu { display: none; }
+    .agent-title { min-width: 0; }
+    .agent-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .agent-state { color: var(--faint); font-size: 10px; margin-top: 2px; }
+    .top-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+    .context-pill { color: var(--muted); font: 10px var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; display: none; }
+    .context-pill.visible { display: block; }
 
-    .welcome h2 { font-size: 17px; }
-    .welcome p { font-size: 13px; }
-  }
+    .chat { min-height: 0; overflow-y: auto; scroll-behavior: smooth; }
+    .feed { width: min(100% - 32px, var(--content)); margin: 0 auto; padding: 24px 0 30px; }
+    .welcome { min-height: calc(100dvh - 220px); display: grid; place-items: center; text-align: center; }
+    .welcome-inner { width: min(520px, 100%); }
+    .welcome-mark { width: 46px; height: 46px; border-radius: 14px; background: #f1f1f1; color: #080808; display: grid; place-items: center; margin: 0 auto 18px; font-size: 19px; font-weight: 900; }
+    .welcome h1 { font-size: clamp(22px, 4vw, 32px); letter-spacing: -.045em; margin: 0; }
+    .welcome p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 10px auto 22px; }
+    .prompts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .prompt {
+      padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel);
+      color: var(--muted); text-align: left; font-size: 11px; line-height: 1.45; cursor: pointer;
+    }
+    .prompt:hover { background: var(--hover); color: var(--text); border-color: #3b3b40; }
+    .turn { margin-bottom: 26px; }
+    .message { display: flex; gap: 10px; margin: 11px 0; }
+    .message.user { justify-content: flex-end; }
+    .bubble { max-width: min(88%, 650px); font-size: 13px; line-height: 1.65; }
+    .user .bubble { background: #ededed; color: #090909; border-radius: 15px 15px 4px 15px; padding: 9px 13px; white-space: pre-wrap; }
+    .assistant .bubble { width: 100%; color: #dedee2; }
+    .avatar { width: 24px; height: 24px; flex: 0 0 24px; border-radius: 8px; display: grid; place-items: center; background: #ededed; color: #090909; font-size: 10px; font-weight: 900; margin-top: 2px; }
+    .markdown { min-width: 0; }
+    .markdown p { margin: 0 0 10px; }
+    .markdown p:last-child { margin-bottom: 0; }
+    .markdown h1, .markdown h2, .markdown h3 { font-size: 14px; margin: 14px 0 7px; color: #fff; }
+    .markdown ul { margin: 6px 0 10px; padding-left: 20px; }
+    .markdown li { margin: 3px 0; }
+    .markdown pre { background: #0e0e10; border: 1px solid var(--line); border-radius: 9px; padding: 12px; overflow-x: auto; font: 11px/1.55 var(--mono); }
+    .markdown code { background: #1b1b1e; border: 1px solid #2c2c31; border-radius: 5px; padding: 1px 4px; font: 11px var(--mono); }
+    .markdown pre code { padding: 0; border: 0; background: transparent; }
+    .markdown a { color: #a9c7ff; }
+    .thinking { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; padding: 7px 2px; }
+    .pulse { display: flex; gap: 3px; }
+    .pulse i { display: block; width: 4px; height: 4px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite; }
+    .pulse i:nth-child(2) { animation-delay: .15s; } .pulse i:nth-child(3) { animation-delay: .3s; }
+    @keyframes pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-2px); } }
+    .reasoning { border-left: 1px solid #34343a; color: var(--faint); margin: 6px 0 9px 12px; padding: 2px 0 2px 10px; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
 
-  @media (max-width: 420px) {
-    .message .bubble, .bubble-content { font-size: 14px; }
-    .message.user .bubble { font-size: 14px; }
-    .header { padding: 6px 8px; }
-    .input-area { padding: 6px 8px 12px; }
-  }
-</style>
+    .tool-stack { margin: 8px 0 12px 34px; display: grid; gap: 6px; }
+    .tool-summary { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 10px; margin: 3px 1px; }
+    .tool-summary button { margin-left: auto; border: 0; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .tool-card { border: 1px solid var(--line); background: #0c0c0e; border-radius: 10px; overflow: hidden; }
+    .tool-head { width: 100%; border: 0; background: transparent; padding: 9px 10px; display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left; }
+    .tool-head:hover { background: #121214; }
+    .tool-icon { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; background: #1e1e22; color: var(--amber); font-size: 10px; }
+    .tool-icon.done { color: var(--green); }
+    .tool-name { font: 11px var(--mono); color: #d2d2d6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-status { margin-left: auto; font-size: 9px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+    .chevron { color: var(--faint); font-size: 9px; transition: transform .15s; }
+    .tool-card.open .chevron { transform: rotate(90deg); }
+    .tool-body { display: none; border-top: 1px solid var(--line-soft); padding: 10px; }
+    .tool-card.open .tool-body { display: block; }
+    .tool-label { color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; margin: 8px 0 5px; }
+    .tool-label:first-child { margin-top: 0; }
+    .tool-body pre { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: #a9a9b0; font: 10px/1.55 var(--mono); }
+
+    .interaction { margin: 10px 0 12px 34px; border: 1px solid #4a3a1d; background: #17130b; border-radius: 11px; padding: 12px; }
+    .interaction.danger { border-color: #55242e; background: #190d11; }
+    .interaction-kicker { color: var(--amber); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; font-weight: 800; }
+    .interaction h3 { font-size: 12px; margin: 5px 0 5px; }
+    .interaction p { color: #b8b1a5; font-size: 11px; line-height: 1.5; margin: 0 0 8px; }
+    .interaction pre { border: 1px solid #3b3220; background: rgba(0,0,0,.28); padding: 8px; border-radius: 7px; color: #d5c8ad; white-space: pre-wrap; word-break: break-word; font: 10px/1.5 var(--mono); max-height: 180px; overflow: auto; }
+    .interaction-actions { display: flex; gap: 7px; margin-top: 10px; flex-wrap: wrap; }
+    .small-btn { border: 1px solid #3b3b40; border-radius: 8px; background: #1b1b1e; padding: 7px 10px; font-size: 10px; cursor: pointer; }
+    .small-btn:hover { background: #252529; }
+    .small-btn.primary { background: #eee; color: #090909; border-color: #eee; font-weight: 700; }
+    .small-btn.deny { color: #ff9cab; border-color: #60303a; }
+    .choice-list { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+    .media-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 7px; margin-top: 9px; }
+    .media-item { min-width: 0; border: 1px solid var(--line); border-radius: 9px; background: #080809; overflow: hidden; }
+    .media-item img, .media-item video { display: block; width: 100%; max-height: 360px; object-fit: contain; background: #050505; }
+    .media-item audio { width: 100%; display: block; }
+    .media-caption { color: var(--faint); font: 9px var(--mono); padding: 6px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .media-loading { color: var(--faint); font-size: 10px; padding: 15px; }
+    .error { margin: 8px 0 8px 34px; border: 1px solid #4c232c; background: #190c10; color: #ff9dab; border-radius: 9px; padding: 9px 11px; font-size: 11px; }
+
+    .composer-wrap { padding: 0 18px max(16px, env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 18%); }
+    .composer { width: min(100%, var(--content)); margin: 0 auto; border: 1px solid #313136; background: #111113; border-radius: 16px; padding: 9px 9px 8px 12px; box-shadow: 0 12px 30px rgba(0,0,0,.3); }
+    .composer:focus-within { border-color: #4b4b52; }
+    textarea { display: block; width: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); min-height: 28px; max-height: 190px; padding: 4px 3px; font-size: 13px; line-height: 1.5; }
+    textarea::placeholder { color: #606068; }
+    .composer-bar { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+    .composer-note { color: var(--faint); font-size: 9px; margin-left: 4px; }
+    .send { margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: 9px; background: var(--accent); color: var(--accent-ink); cursor: pointer; font-size: 15px; font-weight: 900; }
+    .send:disabled { background: #29292d; color: #66666f; cursor: default; }
+    .send.stop { background: #f0f0f0; }
+    .send.stop::after { content: "■"; font-size: 10px; }
+    .send.stop span { display: none; }
+    .mic.active { background: #34151c; color: var(--red); animation: mic 1.3s infinite; }
+    @keyframes mic { 50% { box-shadow: 0 0 0 4px rgba(251,113,133,.09); } }
+
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 80; place-items: center; padding: 18px; }
+    .overlay.open { display: grid; }
+    .modal { width: min(460px, 100%); max-height: 88dvh; overflow: auto; background: #111113; border: 1px solid #303035; border-radius: 15px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+    .modal-head { display: flex; align-items: center; padding: 15px 16px; border-bottom: 1px solid var(--line); }
+    .modal-head h2 { margin: 0; font-size: 14px; }
+    .modal-head button { margin-left: auto; }
+    .modal-body { padding: 16px; display: grid; gap: 14px; }
+    .field label { display: block; color: var(--muted); font-size: 10px; margin-bottom: 6px; }
+    .field input, .field select { width: 100%; border: 1px solid var(--line); background: #0a0a0b; color: var(--text); border-radius: 9px; padding: 9px 10px; font-size: 12px; outline: 0; }
+    .field input:focus, .field select:focus { border-color: #55555d; }
+    .hint { color: var(--faint); font-size: 10px; line-height: 1.5; margin-top: 5px; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .toggle-row strong { font-size: 11px; }
+    .toggle-row span { display: block; color: var(--faint); font-size: 10px; margin-top: 3px; }
+    .switch { appearance: none; width: 34px; height: 19px; border-radius: 999px; background: #303035; position: relative; cursor: pointer; flex: 0 0 auto; }
+    .switch::after { content: ""; position: absolute; width: 15px; height: 15px; border-radius: 50%; background: #aaa; top: 2px; left: 2px; transition: .15s; }
+    .switch:checked { background: #e8e8e8; }
+    .switch:checked::after { left: 17px; background: #080808; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 7px; padding: 0 16px 16px; }
+    .toast { position: fixed; left: 50%; bottom: 105px; transform: translateX(-50%) translateY(8px); background: #e9e9e9; color: #090909; border-radius: 9px; padding: 8px 11px; font-size: 10px; opacity: 0; pointer-events: none; transition: .18s; z-index: 100; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .scrim { display: none; }
+
+    @media (max-width: 760px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: fixed; inset: 0 auto 0 0; width: min(84vw, 310px); transform: translateX(-102%); transition: transform .2s; box-shadow: 20px 0 60px rgba(0,0,0,.5); }
+      .sidebar.open { transform: translateX(0); }
+      .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 35; }
+      .scrim.open { display: block; }
+      .menu { display: grid; }
+      .topbar { padding: 0 10px; }
+      .feed { width: min(100% - 22px, var(--content)); padding-top: 16px; }
+      .composer-wrap { padding-left: 10px; padding-right: 10px; }
+      .tool-stack, .interaction, .error { margin-left: 0; }
+      .prompts { grid-template-columns: 1fr; }
+      .context-pill { display: none !important; }
+      .composer-note { display: none; }
+    }
+  </style>
 </head>
 <body>
-
-<!-- Sidebar -->
-<div class="sidebar">
-  <div class="sidebar-header">
-    <div class="sidebar-logo">★</div>
-    <span class="sidebar-title">Hermes Agent</span>
-    <button class="sidebar-close-btn" id="sidebarCloseBtn" onclick="toggleSidebar()" title="关闭">✕</button>
-  </div>
-  <button class="new-chat-btn" onclick="newChat()">
-    <span class="icon">+</span> <span>新建对话</span>
-  </button>
-  <div class="sidebar-history" id="sidebarHistory"></div>
-</div>
-
-<!-- Main area -->
-<div class="main-area">
-  <div class="header">
-    <button class="hamburger-btn" id="hamburgerBtn" onclick="toggleSidebar()" title="菜单">☰</button>
-    <h1 id="headerTitle">Hermes Agent</h1>
-    <div class="header-right">
-      <span class="hermes-badge">Hermes</span>
-      <span class="status-dot" id="statusDot"></span>
-      <span class="status-text" id="statusText">未连接</span>
-
-    </div>
-  </div>
-
-  <div class="chat-area" id="chatArea">
-    <div class="chat-container" id="chatContainer">
-      <div class="welcome" id="welcomeScreen">
-        <h2 id="welcomeTitle">✦ deepseek-v4-flash</h2>
-        <p id="welcomeDesc">随时可以输入你的问题</p>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Conversations">
+      <div class="brand">
+        <div class="mark">H</div>
+        <div class="brand-copy"><div class="brand-name">Hermes</div><div class="brand-sub">Personal agent</div></div>
+        <button class="icon-btn" id="settingsSide" title="Settings" aria-label="Settings">⚙</button>
       </div>
-    </div>
-    <button class="scroll-top-btn" id="scrollTopBtn" onclick="scrollToTop()" title="回到顶部">↑</button>
-  </div>
+      <button class="new-chat" id="newChat"><span>＋</span> New chat</button>
+      <div class="section-label">Recent</div>
+      <div class="history" id="history"></div>
+      <div class="sidebar-foot"><div class="server-chip"><span class="dot" id="statusDot"></span><span id="statusText">Connecting…</span></div></div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
 
-  <div class="input-area">
-    <div class="context-usage" id="contextUsage" style="display:none;"></div>
-    <div class="input-container">
-      <div class="input-wrapper">
-        <textarea id="messageInput" rows="1" placeholder="发送消息..."
-          onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn menu" id="menuButton" aria-label="Open conversations">☰</button>
+        <div class="agent-title"><div class="agent-name" id="agentName">Hermes Agent</div><div class="agent-state" id="agentState">Ready when you are</div></div>
+        <div class="top-actions">
+          <div class="context-pill" id="contextPill"></div>
+          <button class="icon-btn" id="settingsTop" title="Settings" aria-label="Settings">⚙</button>
+        </div>
+      </header>
+
+      <section class="chat" id="chat" aria-live="polite"><div class="feed" id="feed"></div></section>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea id="input" rows="1" placeholder="Message Hermes…" aria-label="Message Hermes"></textarea>
+          <div class="composer-bar">
+            <button class="icon-btn mic" id="micButton" title="Dictate" aria-label="Start dictation">●</button>
+            <span class="composer-note">Enter to send · Shift+Enter for a new line</span>
+            <button class="send" id="sendButton" aria-label="Send message"><span>↑</span></button>
+          </div>
+        </div>
       </div>
-    </div>
+    </main>
   </div>
-</div>
 
+  <div class="overlay" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal"><form id="settingsForm">
+      <div class="modal-head"><h2 id="settingsTitle">Hermes settings</h2><button class="icon-btn" id="closeSettings" type="button" aria-label="Close settings">×</button></div>
+      <div class="modal-body">
+        <div class="field"><label for="tokenInput">Web access token</label><input id="tokenInput" type="password" autocomplete="off" placeholder="Only needed when server protection is enabled"><div class="hint">Stored only in this browser. It is never placed in chat history.</div></div>
+        <div class="field"><label for="modelInput">Model</label><input id="modelInput" placeholder="Use the backend default"></div>
+        <div class="field"><label for="providerInput">Provider</label><input id="providerInput" placeholder="Use the backend default"></div>
+        <div class="field"><label for="iterationsInput">Maximum tool iterations</label><input id="iterationsInput" type="number" min="1" max="500" value="60"></div>
+        <div class="toggle-row"><div><strong>Play generated speech</strong><span>Attempt playback when Hermes returns a TTS audio file.</span></div><input class="switch" id="autoplayInput" type="checkbox" checked></div>
+      </div>
+      <div class="modal-actions"><button class="small-btn" id="cancelSettings" type="button">Cancel</button><button class="small-btn primary" id="saveSettings" type="submit">Save</button></div>
+    </form></div>
+  </div>
+  <div class="toast" id="toast"></div>
 
+  <script>
+    const state = {
+      ws: null,
+      reconnectTimer: null,
+      currentConversation: null,
+      currentTurn: null,
+      currentReasoning: null,
+      streamingBubble: null,
+      streamingText: "",
+      processing: {},
+      config: {},
+      toolCards: new Map(),
+      expandedAll: false,
+      recognition: null,
+      listening: false,
+      manualScroll: false,
+      objectUrls: [],
+    };
 
-<script>
-const WS_URL = `ws://${location.host}/ws/chat`;
-let ws = null, isProcessing = false, currentAssistantBubble = null, currentReasoningBlock = null;
-let currentConvId = null;
-let currentTurn = null;
-// 每个对话独立的输入框缓存
-let inputBuffer = {};
-// 每个对话独立的处理状态
-let processingState = {};
-// 切换对话时正在加载中的标记，期间忽略旧事件
-let _loadingConvId = null;
-function getContainer() { return currentTurn || document.getElementById('chatContainer'); }
+    const $ = id => document.getElementById(id);
+    const feed = $("feed");
+    const input = $("input");
+    const sendButton = $("sendButton");
+    const token = () => localStorage.getItem("hermesWebToken") || "";
+    const authHeaders = () => token() ? {Authorization: `Bearer ${token()}`} : {};
 
-function connect() {
-  ws = new WebSocket(WS_URL);
-  ws.onopen = async () => {
-    setStatus('已连接', '#22c55e');
-    // 获取对话列表，如果有历史对话则自动加载第一个
-    try {
-      const r = await fetch('/api/conversations?_=' + Date.now(), {cache: 'no-store'});
-      const convs = await r.json();
-      renderSidebar(convs);
-      if (convs && convs.length > 0) {
-        switchChat(convs[0].id);
+    function toast(message) {
+      const el = $("toast");
+      el.textContent = message;
+      el.classList.add("show");
+      clearTimeout(el._timer);
+      el._timer = setTimeout(() => el.classList.remove("show"), 2200);
+    }
+
+    async function api(path, options = {}) {
+      const headers = {...authHeaders(), ...(options.headers || {})};
+      const response = await fetch(path, {...options, headers, cache: "no-store"});
+      if (response.status === 401) {
+        openSettings();
+        throw new Error("Enter the web access token in Settings");
       }
-    } catch(e) { console.error('Failed to load conversations', e); }
-  };
-  ws.onclose = () => { setStatus('未连接', '#ef4444'); if (!isProcessing) setTimeout(connect, 2000); };
-  ws.onerror = () => ws.close();
-  ws.onmessage = (e) => handleEvent(JSON.parse(e.data));
-}
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      return response;
+    }
 
-function setStatus(t, c) {
-  document.getElementById('statusText').textContent = t;
-  document.getElementById('statusDot').style.background = c;
-}
+    function websocketUrl() {
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      return `${scheme}://${location.host}/ws/chat`;
+    }
 
+    function websocketProtocols() {
+      if (!token()) return ["hermes"];
+      const bytes = new TextEncoder().encode(token());
+      let binary = "";
+      bytes.forEach(byte => binary += String.fromCharCode(byte));
+      const encoded = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+      return ["hermes", `auth.${encoded}`];
+    }
 
+    function connect() {
+      clearTimeout(state.reconnectTimer);
+      if (state.ws) state.ws.onclose = null;
+      setConnection(false, "Connecting…");
+      const ws = new WebSocket(websocketUrl(), websocketProtocols());
+      state.ws = ws;
+      ws.onopen = async () => {
+        setConnection(true, "Connected");
+        try {
+          const conversations = await refreshHistory();
+          if (!state.currentConversation && conversations.length) switchConversation(conversations[0].id);
+          else if (!state.currentConversation) renderWelcome();
+        } catch (error) { toast(error.message); }
+      };
+      ws.onmessage = event => {
+        try { handleEvent(JSON.parse(event.data)); } catch { toast("Received an invalid server event"); }
+      };
+      ws.onerror = () => setConnection(false, "Connection error");
+      ws.onclose = () => {
+        setConnection(false, "Disconnected");
+        state.reconnectTimer = setTimeout(connect, 2200);
+      };
+    }
 
-// ── Sidebar: conversation list ──
-async function refreshSidebar() {
-  try {
-    const r = await fetch('/api/conversations?_=' + Date.now(), {cache: 'no-store'});
-    const convs = await r.json();
-    renderSidebar(convs);
-  } catch(e) { console.error('Failed to load conversations', e); }
-}
+    function setConnection(online, label) {
+      $("statusDot").classList.toggle("online", online);
+      $("statusText").textContent = label;
+      $("agentState").textContent = online ? (isProcessing() ? "Working…" : "Ready when you are") : label;
+    }
 
-function renderSidebar(convs) {
-  const el = document.getElementById('sidebarHistory');
-  if (!convs || convs.length === 0) {
-    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px;">暂无历史对话</div>';
-    return;
-  }
-  // 清理已被删除对话的缓存
-  const ids = new Set(convs.map(c => c.id));
-  Object.keys(inputBuffer).forEach(k => { if (!ids.has(k)) delete inputBuffer[k]; });
-  Object.keys(processingState).forEach(k => { if (!ids.has(k)) delete processingState[k]; });
-  el.innerHTML = convs.map(c => {
-    const active = c.id === currentConvId ? 'active' : '';
-    const title = c.title || '新对话';
-    const dot = c.has_agent ? '<span class="agent-dot"></span>' : '<span class="agent-dot hidden"></span>';
-    const meta = `${formatTime(c.updated_at)} · ${c.message_count}条`;
-    return `<div class="conv-item ${active}" onclick="switchChat('${c.id}')">
-      <div class="conv-body"><div class="conv-text"><div class="conv-title-row">${dot}<span class="conv-title">${escapeHtml(title)}</span></div>
-      <div class="conv-meta">${meta}</div></div></div>
-      <button class="conv-delete" onclick="event.stopPropagation();showConfirm('${c.id}')">✕</button>
-    </div>`;
-  }).join('');
-}
+    async function refreshHistory() {
+      const response = await api("/api/conversations");
+      const conversations = await response.json();
+      renderHistory(conversations);
+      return conversations;
+    }
 
-function formatTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts * 1000);
-  const now = new Date();
-  const diff = (now - d) / 1000;
-  if (diff < 60) return '刚刚';
-  if (diff < 3600) return `${Math.floor(diff/60)}分钟前`;
-  if (diff < 86400) return `${Math.floor(diff/3600)}小时前`;
-  if (diff < 172800) return '昨天';
-  return `${d.getMonth()+1}/${d.getDate()}`;
-}
-
-function switchChat(convId) {
-  // 保存当前对话的输入
-  if (currentConvId) {
-    inputBuffer[currentConvId] = document.getElementById('messageInput').value;
-  }
-  // 锁定加载中，忽略目标对话的旧事件
-  _loadingConvId = convId;
-  currentConvId = convId;
-  clearChat();
-  // 恢复目标对话的处理状态
-  const isProc = !!processingState[convId];
-  isProcessing = isProc;
-  if (isProc) {
-    disableInput(true);
-    document.getElementById('sendBtn').innerHTML='<span style="display:inline-block;width:12px;height:12px;background:#fff;border-radius:2px"></span>';
-    document.getElementById('sendBtn').disabled=false;
-    document.getElementById('sendBtn').onclick=stopReply;
-  } else {
-    restoreSendBtn();
-  }
-  // 恢复目标对话的输入
-  const input = document.getElementById('messageInput');
-  input.value = inputBuffer[convId] || '';
-  autoResize(input);
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'switch_chat', conv_id: convId}));
-  }
-  refreshSidebar();
-  closeMobileSidebar();
-}
-
-let pendingDeleteId = null;
-
-function showConfirm(convId) {
-  pendingDeleteId = convId;
-  document.getElementById('confirmModal').classList.add('open');
-  document.getElementById('confirmDeleteBtn').onclick = doDelete;
-}
-function closeConfirm() {
-  document.getElementById('confirmModal').classList.remove('open');
-  pendingDeleteId = null;
-}
-
-async function doDelete() {
-  const convId = pendingDeleteId;
-  closeConfirm();
-  if (!convId) return;
-  // 清除输入缓存
-  delete inputBuffer[convId];
-
-  try {
-    const r = await fetch(`/api/conversations/${encodeURIComponent(convId)}`, {
-      method: 'DELETE', cache: 'no-store'
-    });
-    if (!r.ok) { alert('删除失败 (HTTP ' + r.status + ')'); return; }
-
-    // 如果是当前对话，自动切换到第一个剩余对话或显示欢迎页
-    if (currentConvId === convId) {
-      currentConvId = null;
-      clearChat();
-      // 先获取删除后的列表来判断
-      await new Promise(r => setTimeout(r, 200));
-      const afterRes = await fetch('/api/conversations?_=' + Date.now(), {cache: 'no-store'});
-      const after = await afterRes.json();
-      if (after && after.length > 0) {
-        switchChat(after[0].id);
-        renderSidebar(after);
+    function renderHistory(conversations) {
+      const history = $("history");
+      history.replaceChildren();
+      if (!conversations.length) {
+        const empty = document.createElement("div");
+        empty.className = "hint";
+        empty.style.padding = "10px 8px";
+        empty.textContent = "Your conversations will appear here.";
+        history.append(empty);
         return;
-      } else {
-        const container = document.getElementById('chatContainer');
-        container.innerHTML = `<div class="welcome" id="welcomeScreen">
-          <h2 id="welcomeTitle">✦ deepseek-v4-flash</h2>
-          <p id="welcomeDesc">随时可以输入你的问题</p>
-        </div>`;
-        window._hasMessages = false;
-        renderSidebar(after);
-        return;
+      }
+      conversations.forEach(conversation => {
+        const row = document.createElement("div");
+        row.className = `conversation${conversation.id === state.currentConversation ? " active" : ""}`;
+        row.dataset.id = conversation.id;
+        const body = document.createElement("button");
+        body.className = "conversation-open";
+        const title = document.createElement("div");
+        title.className = "conversation-title";
+        title.textContent = conversation.title || "New Chat";
+        const meta = document.createElement("div");
+        meta.className = "conversation-meta";
+        meta.textContent = `${relativeTime(conversation.updated_at)} · ${conversation.message_count} events`;
+        body.append(title, meta);
+        const remove = document.createElement("button");
+        remove.className = "conversation-delete";
+        remove.textContent = "×";
+        remove.title = "Delete conversation";
+        remove.addEventListener("click", event => { event.stopPropagation(); deleteConversation(conversation.id); });
+        row.append(body, remove);
+        body.addEventListener("click", () => switchConversation(conversation.id));
+        history.append(row);
+      });
+    }
+
+    function relativeTime(timestamp) {
+      const seconds = Math.max(0, Date.now() / 1000 - Number(timestamp || 0));
+      if (seconds < 60) return "now";
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+      if (seconds < 172800) return "yesterday";
+      return new Date(timestamp * 1000).toLocaleDateString(undefined, {month: "short", day: "numeric"});
+    }
+
+    async function deleteConversation(id) {
+      if (!confirm("Delete this conversation? This cannot be undone.")) return;
+      try {
+        await api(`/api/conversations/${encodeURIComponent(id)}`, {method: "DELETE"});
+        if (state.currentConversation === id) {
+          state.currentConversation = null;
+          const conversations = await refreshHistory();
+          if (conversations.length) switchConversation(conversations[0].id); else renderWelcome();
+        } else await refreshHistory();
+      } catch (error) { toast(error.message); }
+    }
+
+    function switchConversation(id) {
+      if (!id || state.ws?.readyState !== WebSocket.OPEN) return;
+      state.currentConversation = id;
+      resetTransient();
+      feed.replaceChildren();
+      const loading = document.createElement("div");
+      loading.className = "thinking";
+      loading.textContent = "Loading conversation…";
+      feed.append(loading);
+      state.ws.send(JSON.stringify({type: "switch_chat", conv_id: id}));
+      refreshHistory().catch(() => {});
+      closeSidebar();
+    }
+
+    function newChat() {
+      state.currentConversation = null;
+      resetTransient();
+      renderWelcome();
+      if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify({type: "new_chat"}));
+      closeSidebar();
+      input.focus();
+    }
+
+    function renderWelcome() {
+      feed.replaceChildren();
+      const wrapper = document.createElement("div");
+      wrapper.className = "welcome";
+      wrapper.innerHTML = `<div class="welcome-inner"><div class="welcome-mark">H</div><h1>Your agent, ready.</h1><p>Give Hermes a task in plain language. You can watch tool calls, approve sensitive actions, and review every result in one thread.</p><div class="prompts"></div></div>`;
+      const prompts = ["Check what needs my attention today", "Research this and give me the short version", "Help me finish a task on my computer", "Draft a clear reply for me"];
+      const grid = wrapper.querySelector(".prompts");
+      prompts.forEach(text => {
+        const button = document.createElement("button");
+        button.className = "prompt";
+        button.textContent = text;
+        button.addEventListener("click", () => { input.value = text; autoResize(); input.focus(); });
+        grid.append(button);
+      });
+      feed.append(wrapper);
+      updateContext(null);
+    }
+
+    function resetTransient() {
+      state.currentTurn = null;
+      state.currentReasoning = null;
+      state.streamingBubble = null;
+      state.streamingText = "";
+      state.toolCards.clear();
+    }
+
+    function isProcessing() { return Boolean(state.processing[state.currentConversation || "pending"]); }
+
+    function setProcessing(value, conversationId = state.currentConversation || "pending") {
+      if (value) state.processing[conversationId] = true; else delete state.processing[conversationId];
+      if (conversationId === state.currentConversation || (!state.currentConversation && conversationId === "pending")) {
+        sendButton.classList.toggle("stop", value);
+        sendButton.setAttribute("aria-label", value ? "Stop response" : "Send message");
+        $("agentState").textContent = value ? "Working…" : "Ready when you are";
       }
     }
 
-    // 强制刷新侧边栏
-    await new Promise(r => setTimeout(r, 200));
-    const afterRes = await fetch('/api/conversations?_=' + Date.now(), {cache: 'no-store'});
-    const after = await afterRes.json();
-    renderSidebar(after);
-  } catch(e) {
-    alert('删除失败: ' + e.message);
-    console.error('Delete error:', e);
-  }
-}
+    function startTurn() {
+      const turn = document.createElement("section");
+      turn.className = "turn";
+      feed.append(turn);
+      state.currentTurn = turn;
+      state.currentReasoning = null;
+      state.streamingBubble = null;
+      state.streamingText = "";
+      return turn;
+    }
 
-// ── Chat management ──
-function handleEvent(d) {
-  const container=document.getElementById('chatContainer'), welcome=document.getElementById('welcomeScreen');
-  // 如果事件有 _conv_id 且不是当前对话，只更新状态不渲染 UI
-  const evtConvId = d._conv_id;
-  if (evtConvId && evtConvId !== currentConvId) {
-    if (d.type === 'done' || d.type === 'error' || d.type === 'stopped') processingState[evtConvId] = false;
-    if (d.type === 'user_message') processingState[evtConvId] = true;
-    return;
-  }
-  // 加载中的对话忽略旧事件（等 load_conversation 完成后再接收）
-  if (evtConvId && evtConvId === _loadingConvId && d.type !== 'load_conversation') {
-    return;
-  }
-  switch(d.type){
-    case'config_loaded':
-      currentConfig=d;
-      if (d.conv_id) {
-        currentConvId = d.conv_id;
-        refreshSidebar();
-      }
-      const welcomeTitle = document.getElementById('welcomeTitle');
-      const welcomeDesc = document.getElementById('welcomeDesc');
-      if (welcomeTitle) welcomeTitle.textContent = `✦ ${d.model||'Hermes Agent'}`;
-      if (welcomeDesc) welcomeDesc.textContent = '随时可以输入你的问题';
-      document.getElementById('headerTitle').textContent = d.model || 'Hermes Agent';
-      showEmptyContext();
-      break;
-    case'load_conversation':
-      // 加载对话事件也要校验 conv_id，防止旧响应覆盖当前对话
-      _loadingConvId = null;
-      if (d._conv_id && d._conv_id !== currentConvId) {
-        break;  // 不是当前对话，丢弃
-      }
-      clearChat();
-      window._hasMessages = false;
-      if (d.messages && d.messages.length > 0) {
-        let turnEl = null;
-        d.messages.forEach(m => {
-          // 用户消息 → 开始新轮次
-          if (m.role === 'user') {
-            turnEl = document.createElement('div');
-            turnEl.className = 'turn';
-            document.getElementById('chatContainer').appendChild(turnEl);
-            currentTurn = turnEl;
-            addUserMessage(m.content);
-          } else if (m.role === 'tool') {
-            // 找最近的非助理消息建轮次（工具可能在首轮开头）
-            if (!turnEl) {
-              turnEl = document.createElement('div');
-              turnEl.className = 'turn';
-              document.getElementById('chatContainer').appendChild(turnEl);
-            }
-            currentTurn = turnEl;
-            addToolCardFromHistory(m);
-          } else if (m.role === 'assistant') {
-            if (!turnEl) {
-              turnEl = document.createElement('div');
-              turnEl.className = 'turn';
-              document.getElementById('chatContainer').appendChild(turnEl);
-            }
-            currentTurn = turnEl;
-            addAssistantMessage(m.content);
-            // 助手回复后结束本轮
-            currentTurn = null;
-            turnEl = null;
-          }
-        });
-        currentTurn = null;
-        scrollToBottom(true);
-        updateContextUsage(d.context);
-      } else {
-        // 空对话显示欢迎页
-        const container = document.getElementById('chatContainer');
-        container.innerHTML = `<div class="welcome" id="welcomeScreen">
-          <h2 id="welcomeTitle">✦ deepseek-v4-flash</h2>
-          <p id="welcomeDesc">随时可以输入你的问题</p>
-        </div>`;
-        showEmptyContext();
-      }
-      break;
-    case'user_message':
-      // 前端已提前显示，后端事件只确认处理中状态
-      if(currentConvId) processingState[currentConvId] = true;
-      if(!isProcessing){isProcessing=true;disableInput(true);}
-      if(welcome){welcome.remove();window._hasMessages=true;}
-      // 不再重复添加用户消息（已在 sendMessage 中立即显示）
-      break;
-    case'thinking': updateThinking(d.content); break;
-    case'reasoning': addReasoning(d.content); break;
-    case'tool_start':
+    function currentContainer() { return state.currentTurn || startTurn(); }
+
+    function addUserMessage(text) {
+      const row = document.createElement("div");
+      row.className = "message user";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      row.append(bubble);
+      currentContainer().append(row);
+    }
+
+    function addAssistantMessage(text) {
       removeThinking();
-      const thinkText = (document.getElementById('thinkingText')?.textContent || '').trim();
-      const reasonText = currentReasoningBlock ? currentReasoningBlock.textContent : '';
-      removeReasoning();
-      const combinedReason = [thinkText, reasonText].filter(Boolean).join('\n');
-      addToolCard(d.id,d.name,d.args,combinedReason);
-      moveBubbleAfterTools();
-      break;
-    case'tool_complete': updateToolCard(d.id,d.name,d.result); if(d.context) updateContextUsage(d.context); break;
-    case'delta': streamDelta(d.content); break;
-    case'done':
-      if(currentConvId) processingState[currentConvId] = false;
-      isProcessing=false;disableInput(false);removeThinking();removeReasoning();
-      finalizeAssistant(d.content);scrollToBottom();
-      updateContextUsage(d.context);
-      refreshSidebar();
-      restoreSendBtn();
-      break;
-    case'end': refreshSidebar(); break;
-    case'stopped':
-      if (d._conv_id) processingState[d._conv_id] = false;
-      restoreSendBtn();
-      break;
-    case'error':
-      if(currentConvId) processingState[currentConvId] = false;
-      isProcessing=false;disableInput(false);removeThinking();removeReasoning();
-      addErrorMessage(d.message);scrollToBottom();
-      restoreSendBtn();
-      break;
-  }
-}
-
-function disableInput(d){document.getElementById('sendBtn').disabled=d;document.getElementById('messageInput').disabled=d;}
-
-function restoreSendBtn(){
-  document.getElementById('sendBtn').textContent='➤';
-  document.getElementById('sendBtn').onclick=sendMessage;
-  isProcessing=false; disableInput(false);
-}
-
-function addUserMessage(t){const c=getContainer(),div=document.createElement('div');div.className='message user';div.innerHTML=`<div class="bubble">${escapeHtml(t)}</div>`;c.appendChild(div);scrollToBottom();}
-
-function getAvatarLetter() {
-  const name = currentConfig?.model || '';
-  return name ? name.trim()[0].toUpperCase() : '?';
-}
-
-function formatTimeFull(now) {
-  const y = now.getFullYear();
-  const M = (now.getMonth()+1).toString().padStart(2,'0');
-  const d = now.getDate().toString().padStart(2,'0');
-  const h = now.getHours().toString().padStart(2,'0');
-  const m = now.getMinutes().toString().padStart(2,'0');
-  const s = now.getSeconds().toString().padStart(2,'0');
-  return `${y}-${M}-${d} ${h}:${m}:${s}`;
-}
-
-function addAssistantMessage(t){
-  const c=getContainer();
-  const div=document.createElement('div');
-  div.className='message assistant';
-  const now = new Date();
-  const time = formatTimeFull(now);
-  div.innerHTML=`<div class="bubble">
-    <div class="msg-header">
-      <span class="avatar">${getAvatarLetter()}</span>
-      <span class="msg-author">hermes-agent</span>
-      <span class="msg-time">${time}</span>
-    </div>
-    <div class="bubble-content">${marked.parse(t)}</div>
-  </div>`;
-  c.appendChild(div);
-}
-
-function addThinking(){removeThinking();const c=getContainer(),div=document.createElement('div');div.className='thinking-indicator';div.id='thinkingIndicator';div.innerHTML=`<span class="thinking-text" id="thinkingText">思考中</span><div class="thinking-dots"><span></span><span></span><span></span></div>`;c.appendChild(div);scrollToBottom();}
-function updateThinking(t){const el=document.getElementById('thinkingText');if(el&&t)el.textContent=t;}
-function removeThinking(){const el=document.getElementById('thinkingIndicator');if(el)el.remove();}
-function addReasoning(t){const c=getContainer();if(!currentReasoningBlock){const div=document.createElement('div');div.className='reasoning-block';div.id='reasoningBlock';c.appendChild(div);currentReasoningBlock=div;}currentReasoningBlock.textContent+=t;scrollToBottom();}
-function removeReasoning(){const el=document.getElementById('reasoningBlock');if(el)el.remove();currentReasoningBlock=null;}
-function addToolCard(id,name,args,reasoning){
-  const c=getContainer();
-  const s=typeof args==='string'?args:JSON.stringify(args,null,2);
-  const div=document.createElement('div');
-  div.className='tool-card';
-  div.id=`tool_${id}`;
-  const reasonHtml = reasoning ? `<div class="label">思考</div><div class="tool-reasoning">${escapeHtml(reasoning)}</div>` : '';
-  div.innerHTML=`<div class="tool-card-header" onclick="toggleToolBody('${id}')"><div class="tool-icon running">⚡</div><span class="tool-name">${escapeHtml(name)}</span><span class="tool-status">running...</span><span class="tool-chevron">▶</span></div><div class="tool-card-body" id="toolBody_${id}">${reasonHtml}<div class="label">参数</div><pre>${escapeHtml(s)}</pre></div>`;
-  c.appendChild(div);
-  scrollToBottom();
-  updateToolsToggleBtn();
-}
-function updateToolCard(id,n,r){const i=document.querySelector(`#tool_${id} .tool-icon`),s=document.querySelector(`#tool_${id} .tool-status`);if(i){i.className='tool-icon done';i.textContent='✓';}if(s)s.textContent='done';const b=document.getElementById(`toolBody_${id}`);if(b&&r){const l=document.createElement('div');l.className='label';l.textContent='结果';b.appendChild(l);const p=document.createElement('pre');p.textContent=r;b.appendChild(p);}}
-function toggleToolBody(id){document.getElementById(`toolBody_${id}`)?.classList.toggle('open');document.querySelector(`#tool_${id} .tool-chevron`)?.classList.toggle('open');}
-
-function toggleAllTools(btn){
-  // 只影响当前轮次的工具卡片
-  const turn = btn.closest('.turn');
-  const bodies = turn ? turn.querySelectorAll('.tool-card-body') : document.querySelectorAll('.tool-card-body');
-  const chevrons = turn ? turn.querySelectorAll('.tool-chevron') : document.querySelectorAll('.tool-chevron');
-  const expanded = btn.dataset.expanded === 'true';
-  const newExpanded = !expanded;
-  btn.dataset.expanded = newExpanded;
-  bodies.forEach(b => b.classList.toggle('open', newExpanded));
-  chevrons.forEach(c => c.classList.toggle('open', newExpanded));
-  btn.innerHTML = newExpanded ? '⊟ 收起全部' : '⊞ 展开全部';
-}
-
-// 工具卡片变化时在当前轮次第一个工具卡片上方插入/移除 toggle 栏
-function updateToolsToggleBtn(){
-  const container = getContainer();
-  const existing = container.querySelector('.tools-toggle-bar');
-  const cards = container.querySelectorAll('.tool-card');
-  const count = cards.length;
-
-  if (count === 0) {
-    if (existing) existing.remove();
-    return;
-  }
-
-  if (existing) {
-    const countEl = existing.querySelector('.tools-count');
-    if (countEl) countEl.textContent = count + ' 个调用';
-    // 确保在第一个工具卡片前
-    const firstCard = cards[0];
-    if (existing.nextElementSibling !== firstCard) {
-      container.insertBefore(existing, firstCard);
+      const row = document.createElement("div");
+      row.className = "message assistant";
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "H";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble markdown";
+      renderMarkdown(bubble, text);
+      row.append(avatar, bubble);
+      currentContainer().append(row);
+      attachMedia(bubble, text, false);
+      state.streamingBubble = null;
+      state.streamingText = "";
+      scrollBottom();
     }
-    return;
-  }
 
-  const bar = document.createElement('div');
-  bar.className = 'tools-toggle-bar';
-  bar.innerHTML = `<span>⚙ 工具调用</span>
-    <span class="tools-count">${count} 个调用</span>
-    <button class="tools-toggle-btn" onclick="toggleAllTools(this)">⊞ 展开全部</button>`;
-  const firstCard = cards[0];
-  container.insertBefore(bar, firstCard);
-}
-function addToolCardFromHistory(m){
-  const c=getContainer();
-  const s=typeof m.tool_args==='string'?m.tool_args:JSON.stringify(m.tool_args||{},null,2);
-  const div=document.createElement('div');
-  div.className='tool-card';
-  const id = m.tool_id || Math.random().toString(36).slice(2);
-  div.id=`tool_${id}`;
-  const reasonHtml = m.reasoning ? `<div class="label">思考</div><div class="tool-reasoning">${escapeHtml(m.reasoning)}</div>` : '';
-  const resultHtml = m.tool_result ? `<div class="label">结果</div><pre>${escapeHtml(m.tool_result)}</pre>` : '';
-  div.innerHTML=`<div class="tool-card-header" onclick="toggleToolBody('${id}')"><div class="tool-icon done">✓</div><span class="tool-name">${escapeHtml(m.tool_name||'')}</span><span class="tool-status">done</span><span class="tool-chevron">▶</span></div><div class="tool-card-body" id="toolBody_${id}">${reasonHtml}<div class="label">参数</div><pre>${escapeHtml(s)}</pre>${resultHtml}</div>`;
-  c.appendChild(div);
-  scrollToBottom();
-  updateToolsToggleBtn();
-}
-// 流式渲染：轻量 inline markdown（粗体、斜体、代码、换行）
-function renderStreaming(t) {
-  return t
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/```[\s\S]*?```/g, m => '<code>' + m.slice(3,-3).replace(/</g,'&lt;') + '</code>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>');
-}
+    function streamDelta(delta) {
+      removeThinking();
+      if (!state.streamingBubble) {
+        const row = document.createElement("div");
+        row.className = "message assistant";
+        const avatar = document.createElement("div");
+        avatar.className = "avatar";
+        avatar.textContent = "H";
+        const bubble = document.createElement("div");
+        bubble.className = "bubble markdown";
+        row.append(avatar, bubble);
+        currentContainer().append(row);
+        state.streamingBubble = bubble;
+      }
+      state.streamingText += delta;
+      renderMarkdown(state.streamingBubble, state.streamingText);
+      scrollBottom();
+    }
 
-// 当工具卡片先出现而气泡已存在时，把气泡移到所有工具卡片后面
-function moveBubbleAfterTools() {
-  if (!currentAssistantBubble) return;
-  const bubbleDiv = currentAssistantBubble.closest('.message.assistant');
-  if (!bubbleDiv) return;
-  const container = getContainer();
-  const cards = container.querySelectorAll('.tool-card');
-  if (cards.length === 0) return;
-  const lastCard = cards[cards.length - 1];
-  container.insertBefore(bubbleDiv, lastCard.nextSibling);
-}
+    function finishAssistant(text) {
+      removeThinking();
+      if (state.streamingBubble) {
+        state.streamingText = text || state.streamingText;
+        renderMarkdown(state.streamingBubble, state.streamingText);
+        attachMedia(state.streamingBubble, state.streamingText, false);
+        state.streamingBubble = null;
+        state.streamingText = "";
+      } else if (text) addAssistantMessage(text);
+    }
 
-let streamFullText = '';
+    function addThinking(label = "Thinking…") {
+      removeThinking();
+      const row = document.createElement("div");
+      row.className = "thinking";
+      row.id = "thinking";
+      const text = document.createElement("span");
+      text.id = "thinkingText";
+      text.textContent = label;
+      const dots = document.createElement("span");
+      dots.className = "pulse";
+      dots.innerHTML = "<i></i><i></i><i></i>";
+      row.append(text, dots);
+      currentContainer().append(row);
+      scrollBottom();
+    }
 
-function streamDelta(t){
-  if(!currentAssistantBubble){
-    const c=getContainer(),div=document.createElement('div');
-    div.className='message assistant';
-    const now = new Date();
-    const time = formatTimeFull(now);
-    div.innerHTML=`<div class="bubble"><div class="msg-header"><span class="avatar">${getAvatarLetter()}</span><span class="msg-author">hermes-agent</span><span class="msg-time">${time}</span></div><div class="bubble-content streaming-cursor" id="streamingBubble"></div></div>`;
-    c.appendChild(div);
-    currentAssistantBubble=div.querySelector('.bubble-content');
-    streamFullText = '';
-  }
-  streamFullText += t;
-  currentAssistantBubble.innerHTML = renderStreaming(streamFullText);
-  scrollToBottom();
-}
+    function updateThinking(text) {
+      const el = $("thinkingText");
+      if (el && text) el.textContent = text;
+      else if (!el) addThinking(text || "Thinking…");
+    }
 
-// ── 上下文用量显示 ──
-function updateContextUsage(ctx) {
-  const el = document.getElementById('contextUsage');
-  if (!ctx || !ctx.messages) {
-    el.style.display = 'none';
-    return;
-  }
-  el.style.display = 'flex';
-  const pct = Math.min(ctx.pct, 100);
-  const model = currentConfig?.model || '';
-  const limitStr = ctx.limit >= 1000000 ? (ctx.limit/1000000).toFixed(0) + 'M' : (ctx.limit/1000).toFixed(0) + 'K';
-  const tokensStr = ctx.tokens >= 1000 ? (ctx.tokens/1000).toFixed(0) + 'K' : ctx.tokens.toString();
-  el.innerHTML = `<span class="ctx-text">${model} ${tokensStr}/${limitStr}</span>
-    <div class="ctx-bar"><div class="ctx-bar-fill" style="width:${pct}%"></div></div>
-    <span class="ctx-text">${ctx.pct}%</span>`;
-}
+    function removeThinking() { $("thinking")?.remove(); }
 
-// 新建对话时显示空上下文条
-function showEmptyContext() {
-  const el = document.getElementById('contextUsage');
-  if (!el) return;
-  const model = currentConfig?.model || '';
-  const limit = currentConfig?.limit || 1000000;
-  const limitStr = limit >= 1000000 ? (limit/1000000).toFixed(0) + 'M' : (limit/1000).toFixed(0) + 'K';
-  el.style.display = 'flex';
-  el.innerHTML = `<span class="ctx-text">${model} 0/${limitStr}</span>
-    <div class="ctx-bar"><div class="ctx-bar-fill" style="width:0%"></div></div>
-    <span class="ctx-text">0%</span>`;
-}
-function finalizeAssistant(t){
-  if(currentAssistantBubble){
-    currentAssistantBubble.classList.remove('streaming-cursor');
-    currentAssistantBubble.innerHTML = marked.parse(t);
-    currentAssistantBubble=null;
-    streamFullText = '';
-  }
-}
-function addErrorMessage(t){const c=getContainer(),div=document.createElement('div');div.className='error-msg';div.textContent='错误: '+t;c.appendChild(div);scrollToBottom();}
+    function addReasoning(text) {
+      if (!state.currentReasoning) {
+        const block = document.createElement("div");
+        block.className = "reasoning";
+        currentContainer().append(block);
+        state.currentReasoning = block;
+      }
+      state.currentReasoning.textContent += text;
+      scrollBottom();
+    }
 
-function clearChat() {
-  const container = document.getElementById('chatContainer');
-  container.innerHTML = '';
-  // 隐藏上下文条（它属于 chat-area 不归 chatContainer 管）
-  const ctxEl = document.getElementById('contextUsage');
-  if (ctxEl) ctxEl.style.display = 'none';
-  window._hasMessages = false;
-  currentAssistantBubble = null;
-  currentReasoningBlock = null;
-  streamFullText = '';
-  userScrolledUp = false;
-  currentTurn = null;
-  updateToolsToggleBtn();
-}
+    function toolStack() {
+      let stack = currentContainer().querySelector(":scope > .tool-stack");
+      if (!stack) {
+        stack = document.createElement("div");
+        stack.className = "tool-stack";
+        currentContainer().append(stack);
+      }
+      return stack;
+    }
 
-function newChat() {
-  // 保存当前对话的输入
-  if (currentConvId) {
-    inputBuffer[currentConvId] = document.getElementById('messageInput').value;
-  }
-  clearChat();
-  // 移动端关闭侧栏
-  closeMobileSidebar();
-  // Show welcome
-  const container = document.getElementById('chatContainer');
-  container.innerHTML = `<div class="welcome" id="welcomeScreen">
-    <h2 id="welcomeTitle">✦ deepseek-v4-flash</h2>
-    <p id="welcomeDesc">随时可以输入你的问题</p>
-  </div>`;
-  window._hasMessages = false;
-  // 新对话输入框清空
-  const input = document.getElementById('messageInput');
-  input.value = '';
-  input.style.height = 'auto';
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'new_chat'}));
-  }
-  // 空对话也显示上下文条
-  showEmptyContext();
-}
+    function updateToolSummary() {
+      const stack = toolStack();
+      let summary = stack.querySelector(".tool-summary");
+      const count = stack.querySelectorAll(".tool-card").length;
+      if (!count) return;
+      if (!summary) {
+        summary = document.createElement("div");
+        summary.className = "tool-summary";
+        const label = document.createElement("span");
+        const toggle = document.createElement("button");
+        toggle.addEventListener("click", () => {
+          state.expandedAll = !state.expandedAll;
+          stack.querySelectorAll(".tool-card").forEach(card => card.classList.toggle("open", state.expandedAll));
+          toggle.textContent = state.expandedAll ? "Collapse all" : "Expand all";
+        });
+        summary.append(label, toggle);
+        stack.prepend(summary);
+      }
+      summary.querySelector("span").textContent = `${count} tool call${count === 1 ? "" : "s"}`;
+      summary.querySelector("button").textContent = state.expandedAll ? "Collapse all" : "Expand all";
+    }
 
-let userScrolledUp = false;
+    function addToolCard(id, name, args, reasoning = "", status = "running", result = "") {
+      removeThinking();
+      const card = document.createElement("article");
+      card.className = `tool-card${state.expandedAll ? " open" : ""}`;
+      const head = document.createElement("button");
+      head.className = "tool-head";
+      const icon = document.createElement("span");
+      icon.className = `tool-icon${status === "done" ? " done" : ""}`;
+      icon.textContent = status === "done" ? "✓" : "↯";
+      const title = document.createElement("span");
+      title.className = "tool-name";
+      title.textContent = name || "tool";
+      const stateLabel = document.createElement("span");
+      stateLabel.className = "tool-status";
+      stateLabel.textContent = status === "done" ? "done" : "running";
+      const chevron = document.createElement("span");
+      chevron.className = "chevron";
+      chevron.textContent = "▶";
+      head.append(icon, title, stateLabel, chevron);
+      const body = document.createElement("div");
+      body.className = "tool-body";
+      if (reasoning) appendToolSection(body, "Reasoning", reasoning, "reasoning");
+      appendToolSection(body, "Arguments", pretty(args), "arguments");
+      if (result) appendToolSection(body, "Result", result, "result");
+      head.addEventListener("click", () => card.classList.toggle("open"));
+      card.append(head, body);
+      toolStack().append(card);
+      state.toolCards.set(id, {card, icon, stateLabel, body, name});
+      updateToolSummary();
+      if (result) attachMedia(body, result, isSpeechTool(name));
+      scrollBottom();
+    }
 
-// 检测用户手动滚动：用户上滚时标记，回到底部时取消
-document.getElementById('chatArea').addEventListener('scroll', function() {
-  const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 10;
-  userScrolledUp = !atBottom;
-}, {passive: true});
+    function appendToolSection(parent, label, value, kind) {
+      const heading = document.createElement("div");
+      heading.className = "tool-label";
+      heading.textContent = label;
+      const content = document.createElement("pre");
+      content.dataset.kind = kind;
+      content.textContent = String(value ?? "");
+      parent.append(heading, content);
+    }
 
-function scrollToBottom(force){
-  const area = document.getElementById('chatArea');
-  if (force) { setTimeout(() => { area.scrollTop = area.scrollHeight; }, 10); return; }
-  // 只有用户没手动上翻过才自动滚动
-  if (!userScrolledUp) {
-    setTimeout(() => { area.scrollTop = area.scrollHeight; }, 10);
-  }
-}
+    function completeTool(id, name, result) {
+      const record = state.toolCards.get(id);
+      if (!record) { addToolCard(id, name, {}, "", "done", result); return; }
+      record.icon.classList.add("done");
+      record.icon.textContent = "✓";
+      record.stateLabel.textContent = "done";
+      appendToolSection(record.body, "Result", result, "result");
+      attachMedia(record.body, result, isSpeechTool(name || record.name));
+      scrollBottom();
+    }
 
-function scrollToTop(){
-  document.getElementById('chatArea').scrollTo({top: 0, behavior: 'smooth'});
-}
+    function pretty(value) {
+      try { return typeof value === "string" ? value : JSON.stringify(value, null, 2); }
+      catch { return String(value); }
+    }
 
-// 滚动时显示/隐藏回到顶部按钮
-document.getElementById('chatArea').addEventListener('scroll', function() {
-  const btn = document.getElementById('scrollTopBtn');
-  const atTop = this.scrollTop < 50;
-  const atBottom = this.scrollHeight - this.scrollTop - this.clientHeight < 50;
+    function addApproval(data) {
+      removeThinking();
+      const card = document.createElement("section");
+      card.className = "interaction danger";
+      const kicker = document.createElement("div");
+      kicker.className = "interaction-kicker";
+      kicker.textContent = "Needs your approval";
+      const title = document.createElement("h3");
+      title.textContent = data.title || "Sensitive action";
+      const description = document.createElement("p");
+      description.textContent = data.description || "Hermes is waiting for your decision.";
+      const command = document.createElement("pre");
+      command.textContent = data.command || "";
+      const actions = document.createElement("div");
+      actions.className = "interaction-actions";
+      actions.append(
+        interactionButton("Approve once", "primary", () => answerApproval(data.request_id, "once", card)),
+        ...(data.allow_session ? [interactionButton("Allow for session", "", () => answerApproval(data.request_id, "session", card))] : []),
+        interactionButton("Cancel", "deny", () => answerApproval(data.request_id, "deny", card))
+      );
+      card.append(kicker, title, description, command, actions);
+      currentContainer().append(card);
+      scrollBottom();
+    }
 
-  if (atTop && this.scrollHeight > this.clientHeight + 100) {
-    // 在顶部且有内容可滚动 → 跳到底部
-    btn.classList.add('show');
-    btn.textContent = '⬇';
-    btn.title = '跳到底部';
-    btn.onclick = scrollToBottomDirect;
-  } else if (atBottom && this.scrollHeight > this.clientHeight + 100) {
-    // 到达底部 → 回到顶部
-    btn.classList.add('show');
-    btn.textContent = '⬆';
-    btn.title = '回到顶部';
-    btn.onclick = scrollToTop;
-  } else {
-    btn.classList.remove('show');
-  }
-}, {passive: true});
+    function interactionButton(text, className, handler) {
+      const button = document.createElement("button");
+      button.className = `small-btn ${className}`.trim();
+      button.textContent = text;
+      button.addEventListener("click", handler);
+      return button;
+    }
 
-function scrollToTop(){
-  document.getElementById('chatArea').scrollTo({top: 0, behavior: 'smooth'});
-}
+    function answerApproval(requestId, decision, card) {
+      if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify({type: "approval_response", request_id: requestId, decision}));
+      card.querySelectorAll("button").forEach(button => button.disabled = true);
+      card.querySelector(".interaction-kicker").textContent = decision === "deny" ? "Cancelled" : "Approved";
+    }
 
-function scrollToBottomDirect(){
-  const area = document.getElementById('chatArea');
-  area.scrollTo({top: area.scrollHeight, behavior: 'smooth'});
-}
+    function addClarification(data) {
+      removeThinking();
+      const card = document.createElement("section");
+      card.className = "interaction";
+      const kicker = document.createElement("div");
+      kicker.className = "interaction-kicker";
+      kicker.textContent = "Hermes has a question";
+      const title = document.createElement("h3");
+      title.textContent = data.question || "Choose an option";
+      const choices = document.createElement("div");
+      choices.className = "choice-list";
+      const values = Array.isArray(data.choices) ? data.choices : [];
+      values.forEach(choice => {
+        const value = typeof choice === "string" ? choice : (choice.value || choice.label || pretty(choice));
+        const label = typeof choice === "string" ? choice : (choice.label || choice.value || "Select");
+        choices.append(interactionButton(label, "", () => answerClarification(data.request_id, value, card)));
+      });
+      if (!values.length) {
+        const answer = document.createElement("input");
+        answer.placeholder = "Type your answer";
+        answer.style.cssText = "flex:1;min-width:180px;border:1px solid #3b3220;background:#0b0a08;color:#eee;border-radius:8px;padding:8px";
+        choices.append(answer, interactionButton("Reply", "primary", () => answerClarification(data.request_id, answer.value, card)));
+      }
+      card.append(kicker, title, choices);
+      currentContainer().append(card);
+      scrollBottom();
+    }
 
-function sendMessage(){
-  const input=document.getElementById('messageInput'),text=input.value.trim();
-  if(!text||isProcessing)return;
-  input.value='';
-  input.style.height='auto';
-  // 发送后清空输入缓存
-  if (currentConvId) inputBuffer[currentConvId] = '';
-  // 立即显示用户输入，不等后端返回
-  const container=document.getElementById('chatContainer');
-  const welcome=document.getElementById('welcomeScreen');
-  if(welcome){welcome.remove();window._hasMessages=true;}
-  // 创建新轮次容器
-  const turn = document.createElement('div');
-  turn.className = 'turn';
-  document.getElementById('chatContainer').appendChild(turn);
-  currentTurn = turn;
-  addUserMessage(text);
-  // 发送到后端（如果连接正常）
-  if(ws?.readyState===WebSocket.OPEN){
-    isProcessing=true; disableInput(true); addThinking();
-    if(currentConvId) processingState[currentConvId] = true;
-    const btn=document.getElementById('sendBtn');
-    btn.innerHTML='<span style="display:inline-block;width:12px;height:12px;background:#fff;border-radius:2px"></span>';
-    btn.disabled=false; // 停止按钮必须可点击
-    btn.onclick=stopReply;
-    ws.send(JSON.stringify({message:text}));
-  }
-}
+    function answerClarification(requestId, response, card) {
+      if (!response) return;
+      if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify({type: "clarification_response", request_id: requestId, response}));
+      card.querySelectorAll("button,input").forEach(control => control.disabled = true);
+      card.querySelector(".interaction-kicker").textContent = "Answered";
+    }
 
-function stopReply(){
-  if (ws?.readyState===WebSocket.OPEN) {
-    ws.send(JSON.stringify({type:'stop'}));
-  }
-  removeThinking(); removeReasoning();
-  if (currentAssistantBubble) {
-    currentAssistantBubble.classList.remove('streaming-cursor');
-    currentAssistantBubble = null;
-  }
-  streamFullText = '';
-  restoreSendBtn();
-}
-function toggleSidebar(){
-  document.querySelector('.sidebar').classList.toggle('mobile-open');
-  document.getElementById('sidebarOverlay').classList.toggle('show');
-}
-// 切换对话时在移动端自动关闭侧栏
-const origSwitchChat = switchChat;
-switchChat = function(convId) {
-  origSwitchChat(convId);
-  closeMobileSidebar();
-};
+    function addError(message) {
+      removeThinking();
+      const error = document.createElement("div");
+      error.className = "error";
+      error.textContent = message || "Something went wrong.";
+      currentContainer().append(error);
+      scrollBottom();
+    }
 
-function closeMobileSidebar() {
-  const sidebar = document.querySelector('.sidebar');
-  if (sidebar.classList.contains('mobile-open')) {
-    sidebar.classList.remove('mobile-open');
-    document.getElementById('sidebarOverlay').classList.remove('show');
-  }
-}
+    function handleEvent(data) {
+      const eventConversation = data._conv_id;
+      if (eventConversation && state.currentConversation && eventConversation !== state.currentConversation) {
+        if (["done", "end", "stopped", "error"].includes(data.type)) setProcessing(false, eventConversation);
+        refreshHistory().catch(() => {});
+        return;
+      }
 
-function sendHint(t){document.getElementById('messageInput').value=t;sendMessage();}
-function handleKeydown(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
-function autoResize(t){t.style.height='auto';t.style.height=Math.min(t.scrollHeight,200)+'px';}
-function escapeHtml(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
+      switch (data.type) {
+        case "config_loaded":
+          state.config = {...state.config, ...data};
+          if (data.conv_id) {
+            if (!state.currentConversation) {
+              delete state.processing.pending;
+              state.currentConversation = data.conv_id;
+            }
+          }
+          $("agentName").textContent = data.model || "Hermes Agent";
+          $("modelInput").value = data.model || "";
+          $("providerInput").value = data.provider || "";
+          $("iterationsInput").value = data.max_iterations || 60;
+          refreshHistory().catch(() => {});
+          break;
+        case "load_conversation":
+          renderConversation(data.messages || []);
+          updateContext(data.context);
+          break;
+        case "user_message":
+          setProcessing(true, eventConversation || state.currentConversation || "pending");
+          break;
+        case "thinking": updateThinking(data.content); break;
+        case "reasoning": addReasoning(data.content || ""); break;
+        case "tool_start":
+          addToolCard(data.id, data.name, data.args, data.reasoning || state.currentReasoning?.textContent || "");
+          state.currentReasoning?.remove(); state.currentReasoning = null;
+          addThinking("Working…");
+          break;
+        case "tool_complete": completeTool(data.id, data.name, data.result || ""); updateContext(data.context); addThinking("Thinking…"); break;
+        case "delta": streamDelta(data.content || ""); break;
+        case "approval_required": addApproval(data); break;
+        case "clarification_required": addClarification(data); break;
+        case "done": finishAssistant(data.content || ""); updateContext(data.context); break;
+        case "end":
+          setProcessing(false, eventConversation || state.currentConversation || "pending");
+          removeThinking(); refreshHistory().catch(() => {}); break;
+        case "stopped":
+          setProcessing(false, eventConversation || state.currentConversation || "pending");
+          removeThinking(); toast("Stopped"); break;
+        case "error":
+          addError(data.message); setProcessing(false, eventConversation || state.currentConversation || "pending"); break;
+      }
+    }
 
-window._hasMessages=false;
-connect();
-</script>
-<!-- 移动端侧栏遮罩 -->
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    function renderConversation(messages) {
+      feed.replaceChildren();
+      resetTransient();
+      if (!messages.length) { renderWelcome(); return; }
+      messages.forEach(message => {
+        if (message.role === "user") { startTurn(); addUserMessage(message.content || ""); }
+        else if (message.role === "tool") addToolCard(message.tool_id || crypto.randomUUID(), message.tool_name, message.tool_args || {}, message.reasoning || "", message.status || "done", message.tool_result || "");
+        else if (message.role === "assistant") addAssistantMessage(message.content || "");
+      });
+      scrollBottom(true);
+    }
 
-<!-- 删除确认弹窗 -->
-<div class="confirm-overlay" id="confirmModal">
-  <div class="confirm-dialog">
-    <h3>删除对话</h3>
-    <p id="confirmText">确定要删除此对话吗？此操作不可撤销。</p>
-    <div class="confirm-actions">
-      <button class="btn btn-cancel" onclick="closeConfirm()">取消</button>
-      <button class="btn btn-danger" id="confirmDeleteBtn">删除</button>
-    </div>
-  </div>
-</div>
+    function updateContext(context) {
+      const pill = $("contextPill");
+      if (!context || context.limit == null) { pill.classList.remove("visible"); return; }
+      const tokens = compactNumber(context.tokens || 0);
+      const limit = compactNumber(context.limit || 0);
+      pill.textContent = `${tokens} / ${limit} · ${Math.min(100, context.pct || 0)}%`;
+      pill.classList.add("visible");
+    }
 
+    function compactNumber(value) {
+      if (value >= 1000000) return `${(value / 1000000).toFixed(value % 1000000 ? 1 : 0)}M`;
+      if (value >= 1000) return `${(value / 1000).toFixed(value % 1000 ? 1 : 0)}K`;
+      return String(value);
+    }
+
+    function sendMessage() {
+      const message = input.value.trim();
+      if (!message || state.ws?.readyState !== WebSocket.OPEN) return;
+      if (isProcessing()) { stopResponse(); return; }
+      if (!state.currentConversation) feed.replaceChildren();
+      startTurn();
+      addUserMessage(message);
+      input.value = "";
+      autoResize();
+      setProcessing(true, state.currentConversation || "pending");
+      addThinking();
+      state.ws.send(JSON.stringify({type: "message", message}));
+      scrollBottom(true);
+    }
+
+    function stopResponse() {
+      if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify({type: "stop"}));
+    }
+
+    function renderMarkdown(container, text) {
+      container.replaceChildren();
+      const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+      let index = 0;
+      while (index < lines.length) {
+        const line = lines[index];
+        if (line.startsWith("```")) {
+          const code = [];
+          index++;
+          while (index < lines.length && !lines[index].startsWith("```")) code.push(lines[index++]);
+          index++;
+          const pre = document.createElement("pre");
+          const node = document.createElement("code");
+          node.textContent = code.join("\n");
+          pre.append(node); container.append(pre); continue;
+        }
+        if (/^[-*] /.test(line)) {
+          const list = document.createElement("ul");
+          while (index < lines.length && /^[-*] /.test(lines[index])) {
+            const item = document.createElement("li");
+            appendInline(item, lines[index].slice(2)); list.append(item); index++;
+          }
+          container.append(list); continue;
+        }
+        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+        if (heading) {
+          const node = document.createElement(`h${heading[1].length}`);
+          appendInline(node, heading[2]); container.append(node); index++; continue;
+        }
+        if (!line.trim()) { index++; continue; }
+        const paragraph = [];
+        while (index < lines.length && lines[index].trim() && !lines[index].startsWith("```") && !/^[-*] /.test(lines[index]) && !/^#{1,3}\s/.test(lines[index])) paragraph.push(lines[index++]);
+        const node = document.createElement("p");
+        paragraph.forEach((part, partIndex) => { if (partIndex) node.append(document.createElement("br")); appendInline(node, part); });
+        container.append(node);
+      }
+    }
+
+    function appendInline(parent, text) {
+      const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+      let cursor = 0;
+      for (const match of text.matchAll(pattern)) {
+        if (match.index > cursor) parent.append(document.createTextNode(text.slice(cursor, match.index)));
+        const tokenValue = match[0];
+        if (tokenValue.startsWith("**")) {
+          const strong = document.createElement("strong"); strong.textContent = tokenValue.slice(2, -2); parent.append(strong);
+        } else if (tokenValue.startsWith("`")) {
+          const code = document.createElement("code"); code.textContent = tokenValue.slice(1, -1); parent.append(code);
+        } else {
+          const linkMatch = tokenValue.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+          let href = "";
+          try { const url = new URL(linkMatch[2], location.href); if (["http:", "https:"].includes(url.protocol)) href = url.href; } catch {}
+          if (href) { const link = document.createElement("a"); link.textContent = linkMatch[1]; link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; parent.append(link); }
+          else parent.append(document.createTextNode(linkMatch[1]));
+        }
+        cursor = match.index + tokenValue.length;
+      }
+      if (cursor < text.length) parent.append(document.createTextNode(text.slice(cursor)));
+    }
+
+    function extractMediaPaths(text) {
+      const found = new Set();
+      const source = String(text || "");
+      for (const line of source.split("\n")) {
+        const marker = line.match(/MEDIA:\s*(.+?)(?:\s+\(|$)/i);
+        if (marker) found.add(marker[1].trim().replace(/^['"]|['"]$/g, ""));
+      }
+      const pathPattern = /(?:^|[\s'"(])((?:\/Users|\/home|\/tmp|\/var\/tmp)\/[^\n'"<>]+?\.(?:png|jpe?g|gif|webp|avif|mp4|webm|mov|mp3|wav|m4a|ogg|flac))(?=$|[\s'"),])/gi;
+      for (const match of source.matchAll(pathPattern)) found.add(match[1].trim());
+      return [...found].slice(0, 12);
+    }
+
+    function isSpeechTool(name) { return /text[_-]?to[_-]?speech|tts|speech/i.test(name || ""); }
+
+    function attachMedia(container, text, autoPlay) {
+      const paths = extractMediaPaths(text);
+      if (!paths.length) return;
+      const grid = document.createElement("div");
+      grid.className = "media-grid";
+      container.append(grid);
+      paths.forEach(path => loadMedia(grid, path, autoPlay));
+    }
+
+    async function loadMedia(grid, path, autoPlay) {
+      const item = document.createElement("div");
+      item.className = "media-item";
+      const loading = document.createElement("div");
+      loading.className = "media-loading";
+      loading.textContent = "Loading media…";
+      item.append(loading);
+      grid.append(item);
+      try {
+        const response = await api(`/api/media?path=${encodeURIComponent(path)}`);
+        const type = response.headers.get("content-type") || "";
+        if (!type.startsWith("image/") && !type.startsWith("audio/") && !type.startsWith("video/")) throw new Error("Media preview needs the upgraded backend on the agent host");
+        const url = URL.createObjectURL(await response.blob());
+        state.objectUrls.push(url);
+        let media;
+        if (type.startsWith("image/")) { media = document.createElement("img"); media.alt = path.split("/").pop() || "Hermes output"; }
+        else if (type.startsWith("video/")) { media = document.createElement("video"); media.controls = true; media.playsInline = true; }
+        else { media = document.createElement("audio"); media.controls = true; }
+        media.src = url;
+        const caption = document.createElement("div");
+        caption.className = "media-caption";
+        caption.textContent = path;
+        item.replaceChildren(media, caption);
+        if (autoPlay && type.startsWith("audio/") && $("autoplayInput").checked) media.play().catch(() => {});
+      } catch (error) {
+        loading.textContent = error.message;
+        loading.title = path;
+      }
+    }
+
+    function autoResize() { input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight, 190)}px`; }
+    function scrollBottom(force = false) {
+      if (force || !state.manualScroll) requestAnimationFrame(() => { $("chat").scrollTop = $("chat").scrollHeight; });
+    }
+
+    function setupVoice() {
+      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Recognition) { $("micButton").title = "Speech recognition is not supported in this browser"; return; }
+      const recognition = new Recognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || "en-US";
+      let base = "";
+      recognition.onstart = () => { state.listening = true; base = input.value.trim(); $("micButton").classList.add("active"); $("micButton").setAttribute("aria-label", "Stop dictation"); };
+      recognition.onresult = event => {
+        let transcript = "";
+        for (let index = event.resultIndex; index < event.results.length; index++) transcript += event.results[index][0].transcript;
+        input.value = `${base}${base ? " " : ""}${transcript}`; autoResize();
+      };
+      recognition.onerror = event => { if (event.error !== "aborted") toast(`Dictation: ${event.error}`); };
+      recognition.onend = () => { state.listening = false; $("micButton").classList.remove("active"); $("micButton").setAttribute("aria-label", "Start dictation"); input.focus(); };
+      state.recognition = recognition;
+    }
+
+    function toggleVoice() {
+      if (!state.recognition) { toast("Speech recognition is not available in this browser"); return; }
+      try { state.listening ? state.recognition.stop() : state.recognition.start(); }
+      catch { toast("Dictation could not start"); }
+    }
+
+    function openSettings() {
+      $("tokenInput").value = token();
+      $("autoplayInput").checked = localStorage.getItem("hermesAutoPlay") !== "false";
+      $("settingsOverlay").classList.add("open");
+      setTimeout(() => $("tokenInput").focus(), 50);
+    }
+
+    function closeSettings() { $("settingsOverlay").classList.remove("open"); }
+
+    function saveSettings() {
+      const previousToken = token();
+      const nextToken = $("tokenInput").value.trim();
+      if (nextToken) localStorage.setItem("hermesWebToken", nextToken); else localStorage.removeItem("hermesWebToken");
+      localStorage.setItem("hermesAutoPlay", String($("autoplayInput").checked));
+      if (state.ws?.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({
+          type: "configure",
+          model: $("modelInput").value.trim(),
+          provider: $("providerInput").value.trim(),
+          max_iterations: Math.max(1, Number($("iterationsInput").value || 60)),
+        }));
+      }
+      closeSettings();
+      if (previousToken !== nextToken) connect();
+      toast("Settings saved");
+    }
+
+    function openSidebar() { $("sidebar").classList.add("open"); $("scrim").classList.add("open"); }
+    function closeSidebar() { $("sidebar").classList.remove("open"); $("scrim").classList.remove("open"); }
+
+    $("newChat").addEventListener("click", newChat);
+    $("sendButton").addEventListener("click", () => isProcessing() ? stopResponse() : sendMessage());
+    input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });
+    input.addEventListener("input", autoResize);
+    $("micButton").addEventListener("click", toggleVoice);
+    $("settingsSide").addEventListener("click", openSettings);
+    $("settingsTop").addEventListener("click", openSettings);
+    $("closeSettings").addEventListener("click", closeSettings);
+    $("cancelSettings").addEventListener("click", closeSettings);
+    $("settingsForm").addEventListener("submit", event => { event.preventDefault(); saveSettings(); });
+    $("settingsOverlay").addEventListener("click", event => { if (event.target === $("settingsOverlay")) closeSettings(); });
+    $("menuButton").addEventListener("click", openSidebar);
+    $("scrim").addEventListener("click", closeSidebar);
+    $("chat").addEventListener("scroll", () => { const chat = $("chat"); state.manualScroll = chat.scrollHeight - chat.scrollTop - chat.clientHeight > 80; });
+    window.addEventListener("beforeunload", () => state.objectUrls.forEach(url => URL.revokeObjectURL(url)));
+
+    $("autoplayInput").checked = localStorage.getItem("hermesAutoPlay") !== "false";
+    setupVoice();
+    renderWelcome();
+    connect();
+  </script>
 </body>
 </html>

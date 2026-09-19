@@ -1,80 +1,97 @@
-# Hermes Web UI
+# Hermes Web
 
+A compact, dark, local-first web interface for [Hermes Agent](https://hermes-agent.nousresearch.com). It is designed to make Hermes feel like a fast personal chat agent while preserving visibility into tool use and sensitive actions.
 
-基于 Web 的 [Hermes Agent](https://hermes-agent.nousresearch.com) 聊天界面。实时显示工具调用、思考过程、推理和流式响应 —— TUI 能展示的一切，在浏览器里也能看到。
+## What changed
 
-## 特性
+- Fully English, high-density dark interface
+- Streaming responses, reasoning, and expandable tool cards
+- Inline image, audio, and video results from approved media roots
+- Browser dictation with `SpeechRecognition`
+- Automatic playback attempt for Hermes `text_to_speech` results
+- Native Approve / Cancel cards for Hermes dangerous-command and clarification callbacks
+- Conversation persistence and responsive mobile layout
+- Optional bearer-token protection for API and WebSocket access
+- Two runtime modes:
+  - **Local mode:** imports `AIAgent` and runs Hermes in-process
+  - **Proxy mode:** serves this interface on one computer while forwarding to an existing `hermes-web` host
 
-- 实时工具调用展示（可展开卡片）
-- 流式 AI 响应 + Markdown 渲染
-- 每个对话独立的 Agent 实例（上下文跨轮次保留）
-- 多对话管理（创建、切换、删除）
-- 上下文用量指示器
+The interaction model and safety presentation were informed by [OpenMausBot](https://github.com/milind-soni/OpenMausBot). This is an independent Hermes-specific implementation; it does not embed OpenMausBot.
 
-## 前置条件
+## Mac Studio → Mac Pro quick start
 
-- Python 3.10+
-- [Hermes Agent](https://hermes-agent.nousresearch.com) 安装在 `~/.hermes/hermes-agent/`
-
-## 快速启动
+The supplied `start-web.sh` automatically uses proxy mode when Hermes is not installed locally. Its default upstream is the Mac Pro at `http://100.92.91.49:3005`.
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/swhje/hermes-web.git
 cd hermes-web
-
-# 2. 安装依赖
-pip install fastapi uvicorn websockets pyyaml
-
-# 3. 启动服务
-python3 backend.py 3005
-
-# 4. 打开浏览器
-# http://127.0.0.1:3005
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+./start-web.sh
 ```
 
-## 推荐：使用 Hermes 自带的 Python 环境
+Open `http://127.0.0.1:3005` on the Mac Studio. Other Tailscale devices can use the Mac Studio's Tailscale address if the firewall allows it.
+
+Proxy mode works immediately with the older Mac Pro server for chat, history, streaming, and tool cards. Approval prompts and remote filesystem media require this upgraded backend to be installed on the Mac Pro, because the older protocol does not expose those capabilities.
+
+## Run directly on the Mac Pro
+
+Copy or clone this fork on the Mac Pro, then point it to the Hermes checkout if auto-detection does not find it:
 
 ```bash
-# 使用 Hermes 内置的 Python，避免依赖冲突
-~/.hermes/hermes-agent/venv/bin/python3.11 backend.py 3005
+export HERMES_AGENT_HOME="$HOME/hermes-agent"
+export HERMES_WEB_TOKEN="replace-with-a-long-random-token"
+./start-web.sh
 ```
 
-### 端口
+The backend searches these locations in order:
+
+1. `$HERMES_AGENT_HOME`
+2. `~/hermes-agent`
+3. `~/.hermes/hermes-agent`
+
+## Configuration
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `HERMES_REMOTE_URL` | Enables proxy mode and selects the upstream | Auto-selects the Mac Pro when Hermes is absent |
+| `HERMES_REMOTE_TOKEN` | Token used by the proxy when the upgraded remote requires one | Empty |
+| `HERMES_WEB_TOKEN` | Protects this server's APIs and WebSocket | Empty |
+| `HERMES_AGENT_HOME` | Hermes Agent source directory for local mode | Auto-detected |
+| `HERMES_WEB_HOST` | Bind address | `0.0.0.0` |
+| `HERMES_WEB_PORT` | Listen port | `3005` |
+| `HERMES_MEDIA_ROOTS` | Colon-separated directories allowed for inline media | `~/.hermes` |
+| `HERMES_APPROVAL_TIMEOUT` | Seconds to wait for an approval response | `300` |
+| `HERMES_WEB_DATA_DIR` | Conversation storage directory | `~/.hermes/hermes-web` |
+
+If `HERMES_WEB_TOKEN` is set, enter the same value once in the interface's Settings panel. The browser stores it in local storage and never sends it as a chat message.
+
+## Voice notes
+
+Browser dictation depends on the browser's `SpeechRecognition` implementation. Most browsers require a secure context for microphone access. Localhost works over HTTP; remote Tailscale access should use HTTPS, for example through Tailscale Serve. Generated TTS audio remains available as a normal audio player if autoplay is blocked.
+
+## Security boundaries
+
+- Keep this service on localhost or a trusted Tailscale network; do not expose port `3005` directly to the public internet.
+- Set `HERMES_WEB_TOKEN` whenever more than one trusted user can reach the host.
+- Media files are only served from `HERMES_MEDIA_ROOTS` and only when their MIME type is image, audio, or video.
+- Tool approvals use Hermes' native approval callback. The interface does not label a tool as approved after it has already executed.
+- API keys remain server-side and are removed from configuration events sent to the upgraded browser client.
+
+## Architecture
+
+```text
+Browser ── HTTP/WebSocket ── Hermes Web backend
+                                  ├── local mode: AIAgent in-process
+                                  └── proxy mode: remote Hermes Web host
+```
+
+Conversations are stored as JSON under `~/.hermes/hermes-web/conversations/` in local mode. Proxy mode leaves persistence on the remote Hermes host.
+
+## Development checks
 
 ```bash
-python3 backend.py 3005   # 默认
-python3 backend.py 8080   # 自定义
+python3 -m py_compile backend.py
+sed -n '/<script>/,/<\/script>/p' frontend/index.html | sed '1d;$d' | node --check
+python3 -m unittest discover -s tests -v
 ```
-
-服务会绑定到 `0.0.0.0`，局域网内可访问。
-
-## 架构
-
-```
-浏览器 ──WebSocket── FastAPI 后端 ──imports── AIAgent（进程内）
-                           │
-                    ThreadPool（每个对话独立）
-```
-
-- 每个对话拥有独立的 `AIAgent` 实例
-- Agent 运行在守护线程中，不阻塞 WebSocket
-- 工具调用进度持久化到 `~/.hermes/hermes-web/conversations/` 的 JSON 文件
-- 页面刷新后 WebSocket 重连，正在运行的 Agent 继续工作
-
-## 项目结构
-
-```
-hermes-web/
-├── backend.py           # FastAPI WebSocket 服务端
-├── frontend/
-│   └── index.html       # SPA 前端（单文件，无需构建工具）
-└── README.md
-```
-
-## 说明
-
-- 前端是单个 HTML 文件 —— 不需要 npm，不需要构建步骤
-- 对话保存为 JSON 文件，存储在 `~/.hermes/hermes-web/conversations/`
-- 默认最多保留 100 个对话（自动删除最旧的）
 
