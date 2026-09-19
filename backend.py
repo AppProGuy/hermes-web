@@ -35,6 +35,11 @@ HOST = os.getenv("HERMES_WEB_HOST", "0.0.0.0")
 DEFAULT_PORT = int(os.getenv("HERMES_WEB_PORT", "3005"))
 MAX_CONVERSATIONS = int(os.getenv("HERMES_WEB_MAX_CONVERSATIONS", "100"))
 APPROVAL_TIMEOUT = int(os.getenv("HERMES_APPROVAL_TIMEOUT", "300"))
+TRANSCRIPTION_MODEL = os.getenv("HERMES_TRANSCRIPTION_MODEL", "spacexai/grok-stt").strip()
+TRANSCRIPTION_URL = os.getenv(
+    "HERMES_TRANSCRIPTION_URL", "https://ai-gateway.vercel.sh/v4/ai/transcription-model"
+).strip()
+MAX_AUDIO_BYTES = int(os.getenv("HERMES_MAX_AUDIO_BYTES", str(25 * 1024 * 1024)))
 
 
 def _validate_remote_url() -> None:
@@ -391,6 +396,76 @@ async def _remote_request(method: str, path: str) -> Response:
     return Response(upstream.content, status_code=upstream.status_code, headers=headers)
 
 
+def _audio_media_type(value: str) -> str:
+    """Return a safe audio MIME type for the transcription provider."""
+    media_type = (value or "").split(";", 1)[0].strip().lower()
+    if not media_type.startswith("audio/"):
+        raise HTTPException(status_code=415, detail="Upload a supported audio recording.")
+    return media_type
+
+
+def _transcription_text(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    text = payload.get("text")
+    return text.strip() if isinstance(text, str) else ""
+
+
+def _ai_gateway_credentials() -> tuple[str, str]:
+    """Resolve the existing Hermes AI Gateway login without exposing it to the browser."""
+    api_key = os.getenv("AI_GATEWAY_API_KEY", "").strip()
+    source = "environment"
+    try:
+        from hermes_cli.auth import resolve_api_key_provider_credentials
+
+        credentials = resolve_api_key_provider_credentials("ai-gateway")
+        resolved = str(credentials.get("api_key") or "").strip()
+        if resolved:
+            api_key = resolved
+            source = str(credentials.get("source") or "Hermes auth store")
+    except Exception:
+        pass
+    return api_key, source
+
+
+async def _transcribe_with_gateway(audio: bytes, media_type: str) -> dict:
+    api_key, _source = _ai_gateway_credentials()
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Vercel AI Gateway is not connected on the Hermes host.",
+        )
+    if not TRANSCRIPTION_MODEL:
+        raise HTTPException(status_code=503, detail="No transcription model is configured.")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "ai-gateway-protocol-version": "0.0.1",
+        "ai-transcription-model-specification-version": "4",
+        "ai-model-id": TRANSCRIPTION_MODEL,
+    }
+    body = {"audio": base64.b64encode(audio).decode("ascii"), "mediaType": media_type}
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=False) as client:
+            response = await client.post(TRANSCRIPTION_URL, headers=headers, json=body)
+        response.raise_for_status()
+        payload = response.json()
+    except httpx.TimeoutException as error:
+        raise HTTPException(status_code=504, detail="Transcription timed out. Try a shorter note.") from error
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=502, detail="The transcription service could not process this note.") from error
+
+    text = _transcription_text(payload)
+    if not text:
+        raise HTTPException(status_code=502, detail="No speech was detected in that note.")
+    result = {"text": text, "model": TRANSCRIPTION_MODEL}
+    for key in ("language", "durationInSeconds"):
+        if payload.get(key) is not None:
+            result[key] = payload[key]
+    return result
+
+
 def _agent_models_from_catalog(provider: str, rows: Any) -> list[str]:
     models: list[str] = []
     for row in rows if isinstance(rows, list) else []:
@@ -552,6 +627,39 @@ async def model_options(request: Request):
     _require_http_auth(request)
     payload = await _remote_model_options() if REMOTE_URL else await asyncio.to_thread(_local_model_options)
     return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/transcribe")
+async def transcribe_audio(request: Request):
+    _require_http_auth(request)
+    media_type = _audio_media_type(request.headers.get("content-type", ""))
+    content_length = request.headers.get("content-length", "")
+    if content_length.isdigit() and int(content_length) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Voice notes are limited to 25 MB.")
+
+    audio = await request.body()
+    if len(audio) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Voice notes are limited to 25 MB.")
+    if len(audio) < 256:
+        raise HTTPException(status_code=400, detail="That recording was too short to transcribe.")
+
+    if REMOTE_URL:
+        headers = {**_remote_headers(), "Content-Type": media_type}
+        try:
+            async with httpx.AsyncClient(timeout=130.0, follow_redirects=False) as client:
+                upstream = await client.post(f"{REMOTE_URL}/api/transcribe", headers=headers, content=audio)
+        except httpx.HTTPError as error:
+            raise HTTPException(status_code=503, detail="The Hermes host is unavailable.") from error
+        content_type = upstream.headers.get("content-type", "application/json")
+        return Response(
+            upstream.content,
+            status_code=upstream.status_code,
+            media_type=content_type.split(";", 1)[0],
+            headers={"Cache-Control": "no-store"},
+        )
+
+    result = await _transcribe_with_gateway(audio, media_type)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/conversations")

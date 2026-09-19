@@ -183,7 +183,15 @@
     .send.stop { background: #f0f0f0; }
     .send.stop::after { content: "■"; font-size: 10px; }
     .send.stop span { display: none; }
+    .mic svg { width: 15px; height: 15px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
     .mic.active { background: #34151c; color: var(--red); animation: mic 1.3s infinite; }
+    .mic.transcribing { color: var(--amber); cursor: wait; animation: pulse 1.2s infinite; }
+    .voice-status { display: none; align-items: center; gap: 7px; color: #b9b9c0; font: 10px var(--mono); white-space: nowrap; }
+    .voice-status.visible { display: flex; }
+    .voice-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px rgba(251,113,133,.09); }
+    .voice-cancel { display: none; border: 0; background: transparent; color: var(--muted); padding: 5px 4px; font-size: 10px; cursor: pointer; }
+    .voice-cancel.visible { display: inline-block; }
+    .voice-cancel:hover { color: var(--text); }
     @keyframes mic { 50% { box-shadow: 0 0 0 4px rgba(251,113,133,.09); } }
 
     .overlay { display: none; position: fixed; inset: 0; height: var(--app-height); background: rgba(0,0,0,.7); z-index: 80; place-items: center; padding: 18px; }
@@ -265,7 +273,9 @@
         <div class="composer">
           <textarea id="input" rows="1" placeholder="Message Hermes…" aria-label="Message Hermes"></textarea>
           <div class="composer-bar">
-            <button class="icon-btn mic" id="micButton" title="Dictate" aria-label="Start dictation">●</button>
+            <button class="icon-btn mic" id="micButton" title="Record a voice note" aria-label="Record a voice note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M9 21h6"></path></svg></button>
+            <span class="voice-status" id="voiceStatus" role="status"><span class="voice-dot" id="voiceDot"></span><span id="voiceStatusText">0:00</span></span>
+            <button class="voice-cancel" id="voiceCancel" type="button">Cancel</button>
             <span class="composer-note">Enter to send · Shift+Enter for a new line</span>
             <button class="send" id="sendButton" aria-label="Send message"><span>↑</span></button>
           </div>
@@ -299,8 +309,14 @@
       streamingText: "",
       processing: {},
       config: {},
-      recognition: null,
-      listening: false,
+      mediaRecorder: null,
+      recordingStream: null,
+      recordingChunks: [],
+      recordingStartedAt: 0,
+      recordingTimer: null,
+      recordingLimitTimer: null,
+      voiceCancelled: false,
+      voicePhase: "idle",
       manualScroll: false,
       objectUrls: [],
       modelOptions: null,
@@ -330,7 +346,14 @@
         openSettings();
         throw new Error("Enter the web access token in Settings");
       }
-      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      if (!response.ok) {
+        let message = `Request failed (${response.status})`;
+        try {
+          const payload = await response.clone().json();
+          if (typeof payload?.detail === "string") message = payload.detail;
+        } catch {}
+        throw new Error(message);
+      }
       return response;
     }
 
@@ -1001,28 +1024,138 @@
     }
 
     function setupVoice() {
-      const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!Recognition) { $("micButton").title = "Speech recognition is not supported in this browser"; return; }
-      const recognition = new Recognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = navigator.language || "en-US";
-      let base = "";
-      recognition.onstart = () => { state.listening = true; base = input.value.trim(); $("micButton").classList.add("active"); $("micButton").setAttribute("aria-label", "Stop dictation"); };
-      recognition.onresult = event => {
-        let transcript = "";
-        for (let index = event.resultIndex; index < event.results.length; index++) transcript += event.results[index][0].transcript;
-        input.value = `${base}${base ? " " : ""}${transcript}`; autoResize();
-      };
-      recognition.onerror = event => { if (event.error !== "aborted") toast(`Dictation: ${event.error}`); };
-      recognition.onend = () => { state.listening = false; $("micButton").classList.remove("active"); $("micButton").setAttribute("aria-label", "Start dictation"); input.focus(); };
-      state.recognition = recognition;
+      const button = $("micButton");
+      if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+        button.title = "Voice notes need the secure HTTPS Hermes link";
+      } else if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        button.title = "Voice recording is not supported in this browser";
+      }
+    }
+
+    function preferredAudioType() {
+      const choices = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus"];
+      return choices.find(type => MediaRecorder.isTypeSupported?.(type)) || "";
+    }
+
+    function formatVoiceTime(milliseconds) {
+      const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }
+
+    function setVoiceUi(phase, text = "") {
+      state.voicePhase = phase;
+      const button = $("micButton");
+      const status = $("voiceStatus");
+      const statusText = $("voiceStatusText");
+      const cancel = $("voiceCancel");
+      button.classList.toggle("active", phase === "recording");
+      button.classList.toggle("transcribing", phase === "transcribing");
+      button.disabled = phase === "transcribing";
+      status.classList.toggle("visible", phase !== "idle");
+      cancel.classList.toggle("visible", phase === "recording");
+      $("voiceDot").style.display = phase === "recording" ? "block" : "none";
+      statusText.textContent = text || (phase === "transcribing" ? "Transcribing…" : "0:00");
+      button.setAttribute("aria-label", phase === "recording" ? "Stop and transcribe voice note" : "Record a voice note");
+      button.title = phase === "recording" ? "Stop and transcribe" : "Record a voice note";
+    }
+
+    function clearVoiceTimers() {
+      clearInterval(state.recordingTimer);
+      clearTimeout(state.recordingLimitTimer);
+      state.recordingTimer = null;
+      state.recordingLimitTimer = null;
+    }
+
+    function releaseRecordingStream() {
+      state.recordingStream?.getTracks().forEach(track => track.stop());
+      state.recordingStream = null;
+    }
+
+    async function startVoiceRecording() {
+      if (!window.isSecureContext && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+        toast("Voice notes need the secure HTTPS Hermes link");
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        toast("Voice recording is not supported in this browser");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
+        const mimeType = preferredAudioType();
+        const recorder = mimeType ? new MediaRecorder(stream, {mimeType}) : new MediaRecorder(stream);
+        state.recordingStream = stream;
+        state.mediaRecorder = recorder;
+        state.recordingChunks = [];
+        state.voiceCancelled = false;
+        state.recordingStartedAt = Date.now();
+        recorder.ondataavailable = event => { if (event.data?.size) state.recordingChunks.push(event.data); };
+        recorder.onerror = () => { toast("Recording failed. Please try again."); cancelVoiceRecording(); };
+        recorder.onstop = () => finishVoiceRecording(recorder.mimeType || mimeType || "audio/webm");
+        recorder.start(500);
+        setVoiceUi("recording", "0:00");
+        state.recordingTimer = setInterval(() => {
+          $("voiceStatusText").textContent = formatVoiceTime(Date.now() - state.recordingStartedAt);
+        }, 250);
+        state.recordingLimitTimer = setTimeout(() => stopVoiceRecording(), 5 * 60 * 1000);
+      } catch (error) {
+        releaseRecordingStream();
+        const denied = error?.name === "NotAllowedError" || error?.name === "SecurityError";
+        toast(denied ? "Allow microphone access to record a voice note" : "The microphone could not start");
+        setVoiceUi("idle");
+      }
+    }
+
+    function stopVoiceRecording() {
+      if (state.voicePhase !== "recording" || state.mediaRecorder?.state === "inactive") return;
+      clearVoiceTimers();
+      setVoiceUi("transcribing");
+      state.mediaRecorder.stop();
+      releaseRecordingStream();
+    }
+
+    function cancelVoiceRecording() {
+      if (state.voicePhase === "transcribing") return;
+      state.voiceCancelled = true;
+      clearVoiceTimers();
+      if (state.mediaRecorder?.state && state.mediaRecorder.state !== "inactive") state.mediaRecorder.stop();
+      releaseRecordingStream();
+      state.recordingChunks = [];
+      setVoiceUi("idle");
+    }
+
+    async function finishVoiceRecording(mimeType) {
+      clearVoiceTimers();
+      releaseRecordingStream();
+      if (state.voiceCancelled) { setVoiceUi("idle"); return; }
+      const blob = new Blob(state.recordingChunks, {type: mimeType.split(";", 1)[0]});
+      state.recordingChunks = [];
+      if (blob.size < 256) { toast("That recording was too short"); setVoiceUi("idle"); return; }
+      setVoiceUi("transcribing");
+      try {
+        const response = await api("/api/transcribe", {
+          method: "POST",
+          headers: {"Content-Type": blob.type || "audio/webm"},
+          body: blob,
+        });
+        const payload = await response.json();
+        const transcript = String(payload.text || "").trim();
+        if (!transcript) throw new Error("No speech was detected in that note");
+        const existing = input.value.trim();
+        input.value = `${existing}${existing ? " " : ""}${transcript}`;
+        autoResize();
+        input.focus();
+      } catch (error) {
+        toast(error.message || "Transcription failed");
+      } finally {
+        state.mediaRecorder = null;
+        setVoiceUi("idle");
+      }
     }
 
     function toggleVoice() {
-      if (!state.recognition) { toast("Speech recognition is not available in this browser"); return; }
-      try { state.listening ? state.recognition.stop() : state.recognition.start(); }
-      catch { toast("Dictation could not start"); }
+      if (state.voicePhase === "recording") stopVoiceRecording();
+      else if (state.voicePhase === "idle") startVoiceRecording();
     }
 
     function openSettings() {
@@ -1061,6 +1194,7 @@
     input.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(); } });
     input.addEventListener("input", autoResize);
     $("micButton").addEventListener("click", toggleVoice);
+    $("voiceCancel").addEventListener("click", cancelVoiceRecording);
     $("settingsSide").addEventListener("click", openSettings);
     $("settingsTop").addEventListener("click", openSettings);
     $("closeSettings").addEventListener("click", closeSettings);
@@ -1076,7 +1210,10 @@
     $("menuButton").addEventListener("click", openSidebar);
     $("scrim").addEventListener("click", closeSidebar);
     $("chat").addEventListener("scroll", () => { const chat = $("chat"); state.manualScroll = chat.scrollHeight - chat.scrollTop - chat.clientHeight > 80; });
-    window.addEventListener("beforeunload", () => state.objectUrls.forEach(url => URL.revokeObjectURL(url)));
+    window.addEventListener("beforeunload", () => {
+      releaseRecordingStream();
+      state.objectUrls.forEach(url => URL.revokeObjectURL(url));
+    });
 
     $("autoplayInput").checked = localStorage.getItem("hermesAutoPlay") !== "false";
     installMobileStability();

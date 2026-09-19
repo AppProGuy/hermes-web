@@ -76,6 +76,19 @@ class BackendUnitTests(unittest.TestCase):
         ]
         self.assertEqual(backend._agent_models_from_catalog("openrouter", rows), ["vendor/agent"])
 
+    def test_audio_media_type_strips_codec_parameters(self):
+        self.assertEqual(backend._audio_media_type("audio/webm;codecs=opus"), "audio/webm")
+
+    def test_audio_media_type_rejects_non_audio_uploads(self):
+        with self.assertRaises(backend.HTTPException) as raised:
+            backend._audio_media_type("application/octet-stream")
+        self.assertEqual(raised.exception.status_code, 415)
+
+    def test_transcription_text_accepts_only_nonempty_text(self):
+        self.assertEqual(backend._transcription_text({"text": "  hello there  "}), "hello there")
+        self.assertEqual(backend._transcription_text({"text": 12}), "")
+        self.assertEqual(backend._transcription_text(None), "")
+
 
 if __name__ == "__main__":
     unittest.main()
