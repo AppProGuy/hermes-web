@@ -45,27 +45,15 @@
     .brand { height: 58px; padding: 0 14px; display: flex; align-items: center; gap: 10px; }
     .mascot {
       position: relative; width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center;
-      border-radius: 50%; isolation: isolate; animation: mascot-idle 4.5s ease-in-out infinite;
+      transform-origin: 50% 82%; animation: mascot-idle 4.5s ease-in-out infinite;
     }
-    .mascot::before {
-      content: ""; position: absolute; inset: -4px; z-index: -1; border-radius: 50%;
-      background: radial-gradient(circle, rgba(251,191,36,.24), transparent 68%); opacity: .35;
-    }
-    .mascot img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: 50%; border: 1px solid #343438; }
-    .mascot-spark { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #ffd98a; opacity: 0; box-shadow: 0 0 7px #fbbf24; }
-    .mascot-spark.a { top: -4px; left: 15px; }
-    .mascot-spark.b { right: -3px; bottom: 7px; }
-    .mascot.working { animation: mascot-work .72s ease-in-out infinite alternate; }
-    .mascot.working::before { animation: mascot-glow 1s ease-in-out infinite; }
-    .mascot.working img { border-color: rgba(251,191,36,.75); filter: saturate(1.16) brightness(1.08); }
-    .mascot.working .mascot-spark.a { animation: mascot-orbit-a 1.35s linear infinite; }
-    .mascot.working .mascot-spark.b { animation: mascot-orbit-b 1.35s linear infinite; }
+    .mascot img { width: 140%; height: 140%; max-width: none; display: block; object-fit: contain; transform-origin: 50% 82%; }
+    .mascot.working { animation: mascot-work .68s ease-in-out infinite alternate; }
+    .mascot.working img { animation: mascot-squish .68s ease-in-out infinite alternate; }
     .top-mascot { display: none; width: 32px; height: 32px; flex-basis: 32px; }
-    @keyframes mascot-idle { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-1px) scale(1.02); } }
-    @keyframes mascot-work { from { transform: translateY(1px) rotate(-2deg) scale(1); } to { transform: translateY(-3px) rotate(2deg) scale(1.06); } }
-    @keyframes mascot-glow { 0%, 100% { opacity: .35; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.22); } }
-    @keyframes mascot-orbit-a { 0% { opacity: 0; transform: translate(-8px, 7px); } 30%, 70% { opacity: 1; } 100% { opacity: 0; transform: translate(15px, 28px); } }
-    @keyframes mascot-orbit-b { 0% { opacity: 0; transform: translate(7px, -4px); } 30%, 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-22px, -20px); } }
+    @keyframes mascot-idle { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-1px) rotate(-1deg); } }
+    @keyframes mascot-work { from { transform: translateY(1px) rotate(-4deg); } to { transform: translateY(-3px) rotate(4deg); } }
+    @keyframes mascot-squish { from { transform: scaleX(1.06) scaleY(.94); } to { transform: scaleX(.96) scaleY(1.06); } }
     .brand-copy { min-width: 0; flex: 1; }
     .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -.01em; }
     .brand-sub { font-size: 10px; color: var(--faint); margin-top: 1px; }
@@ -116,7 +104,7 @@
     .welcome { min-height: calc(100dvh - 220px); display: grid; place-items: center; text-align: center; }
     .welcome-inner { width: min(520px, 100%); }
     .welcome-mark { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; margin: 0 auto 18px; box-shadow: 0 0 30px rgba(251,191,36,.1); }
-    .welcome-mark img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 1px solid #343438; }
+    .welcome-mark img { width: 125%; height: 125%; max-width: none; object-fit: contain; }
     .welcome h1 { font-size: clamp(22px, 4vw, 32px); letter-spacing: -.045em; margin: 0; }
     .welcome p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 10px auto 22px; }
     .prompts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
@@ -224,8 +212,8 @@
       .composer-note { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
-      .mascot, .mascot::before, .mascot-spark { animation: none !important; }
-      .mascot.working { transform: none; box-shadow: 0 0 0 3px rgba(251,191,36,.18); }
+      .mascot, .mascot img { animation: none !important; }
+      .mascot.working { transform: rotate(3deg); }
     }
   </style>
 </head>
@@ -233,7 +221,7 @@
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Conversations">
       <div class="brand">
-        <div class="mascot mascot-sync" aria-hidden="true"><img src="/assets/hermes-mascot.png" alt=""><span class="mascot-spark a"></span><span class="mascot-spark b"></span></div>
+        <div class="mascot mascot-sync" aria-hidden="true"><img src="/assets/hermes-mascot.png" alt=""></div>
         <div class="brand-copy"><div class="brand-name">Hermes</div><div class="brand-sub">Personal agent</div></div>
         <button class="icon-btn" id="settingsSide" title="Settings" aria-label="Settings">⚙</button>
       </div>
@@ -247,7 +235,7 @@
     <main class="main">
       <header class="topbar">
         <button class="icon-btn menu" id="menuButton" aria-label="Open conversations">☰</button>
-        <div class="mascot mascot-sync top-mascot" aria-hidden="true"><img src="/assets/hermes-mascot.png" alt=""><span class="mascot-spark a"></span><span class="mascot-spark b"></span></div>
+        <div class="mascot mascot-sync top-mascot" aria-hidden="true"><img src="/assets/hermes-mascot.png" alt=""></div>
         <div class="agent-title"><div class="agent-name" id="agentName">Hermes Agent</div><div class="agent-state" id="agentState">Ready when you are</div></div>
         <div class="top-actions">
           <div class="context-pill" id="contextPill"></div>
