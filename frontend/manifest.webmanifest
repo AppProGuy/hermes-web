@@ -1,0 +1,19 @@
+{
+  "name": "Hermes Agent",
+  "short_name": "Hermes",
+  "description": "Your personal Hermes agent",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#070707",
+  "theme_color": "#070707",
+  "icons": [
+    {
+      "src": "/assets/hermes-mascot.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

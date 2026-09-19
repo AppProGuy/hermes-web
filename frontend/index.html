@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#070707">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hermes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/assets/hermes-mascot.png">
   <title>Hermes</title>
   <style>
     :root {
@@ -26,23 +33,31 @@
       --sidebar: 278px;
       --content: 780px;
       --radius: 12px;
+      --app-height: 100dvh;
       --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
     }
 
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
-    body { background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
-    button, textarea, input, select { font: inherit; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+    html { background: var(--bg); }
+    body {
+      position: fixed; inset: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+      overflow: hidden; overscroll-behavior: none; touch-action: none; -webkit-text-size-adjust: 100%;
+    }
+    button, textarea, input, select { font: inherit; touch-action: manipulation; }
     button { color: inherit; }
     :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-    .app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); height: 100dvh; }
+    .app {
+      display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); width: 100%;
+      height: var(--app-height); max-height: var(--app-height); overflow: hidden;
+    }
 
     .sidebar {
-      min-width: 0; background: #0a0a0b; border-right: 1px solid var(--line-soft);
+      min-width: 0; min-height: 0; background: #0a0a0b; border-right: 1px solid var(--line-soft);
       display: flex; flex-direction: column; z-index: 40;
     }
-    .brand { height: 58px; padding: 0 14px; display: flex; align-items: center; gap: 10px; }
+    .brand { height: calc(58px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 14px 0; display: flex; align-items: center; gap: 10px; }
     .mascot {
       position: relative; width: 34px; height: 34px; flex: 0 0 34px; display: grid; place-items: center;
       transform-origin: 50% 82%; animation: mascot-idle 4.5s ease-in-out infinite;
@@ -69,7 +84,7 @@
     }
     .new-chat:hover { background: var(--hover); border-color: #3b3b40; }
     .section-label { padding: 4px 16px 7px; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .history { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+    .history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; padding: 0 8px 12px; }
     .history::-webkit-scrollbar, .chat::-webkit-scrollbar { width: 5px; }
     .history::-webkit-scrollbar-thumb, .chat::-webkit-scrollbar-thumb { background: #29292d; border-radius: 4px; }
     .conversation {
@@ -89,8 +104,8 @@
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px rgba(251,113,133,.08); }
     .dot.online { background: var(--green); box-shadow: 0 0 0 3px rgba(74,222,128,.08); }
 
-    .main { min-width: 0; display: grid; grid-template-rows: 58px minmax(0, 1fr) auto; background: var(--bg); }
-    .topbar { border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; padding: 0 18px; gap: 12px; }
+    .main { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-rows: calc(58px + env(safe-area-inset-top)) minmax(0, 1fr) auto; background: var(--bg); }
+    .topbar { border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; padding: env(safe-area-inset-top) 18px 0; gap: 12px; }
     .menu { display: none; }
     .agent-title { min-width: 0; }
     .agent-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -99,9 +114,9 @@
     .context-pill { color: var(--muted); font: 10px var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; display: none; }
     .context-pill.visible { display: block; }
 
-    .chat { min-height: 0; overflow-y: auto; scroll-behavior: smooth; }
+    .chat { min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; scroll-behavior: smooth; }
     .feed { width: min(100% - 32px, var(--content)); margin: 0 auto; padding: 24px 0 30px; }
-    .welcome { min-height: calc(100dvh - 220px); display: grid; place-items: center; text-align: center; }
+    .welcome { min-height: calc(var(--app-height) - 220px); display: grid; place-items: center; text-align: center; }
     .welcome-inner { width: min(520px, 100%); }
     .welcome-mark { width: 58px; height: 58px; border-radius: 50%; display: grid; place-items: center; margin: 0 auto 18px; box-shadow: 0 0 30px rgba(251,191,36,.1); }
     .welcome-mark img { width: 125%; height: 125%; max-width: none; object-fit: contain; }
@@ -171,9 +186,9 @@
     .mic.active { background: #34151c; color: var(--red); animation: mic 1.3s infinite; }
     @keyframes mic { 50% { box-shadow: 0 0 0 4px rgba(251,113,133,.09); } }
 
-    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 80; place-items: center; padding: 18px; }
+    .overlay { display: none; position: fixed; inset: 0; height: var(--app-height); background: rgba(0,0,0,.7); z-index: 80; place-items: center; padding: 18px; }
     .overlay.open { display: grid; }
-    .modal { width: min(460px, 100%); max-height: 88dvh; overflow: auto; background: #111113; border: 1px solid #303035; border-radius: 15px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
+    .modal { width: min(460px, 100%); max-height: calc(var(--app-height) - 36px); overflow: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; background: #111113; border: 1px solid #303035; border-radius: 15px; box-shadow: 0 24px 80px rgba(0,0,0,.55); }
     .modal-head { display: flex; align-items: center; padding: 15px 16px; border-bottom: 1px solid var(--line); }
     .modal-head h2 { margin: 0; font-size: 14px; }
     .modal-head button { margin-left: auto; }
@@ -203,13 +218,14 @@
       .scrim.open { display: block; }
       .menu { display: grid; }
       .top-mascot { display: grid; }
-      .topbar { padding: 0 10px; }
+      .topbar { padding: env(safe-area-inset-top) 10px 0; }
       .feed { width: min(100% - 22px, var(--content)); padding-top: 16px; }
       .composer-wrap { padding-left: 10px; padding-right: 10px; }
       .interaction, .error { margin-left: 0; }
       .prompts { grid-template-columns: 1fr; }
       .context-pill { display: none !important; }
       .composer-note { display: none; }
+      textarea, .field input, .field select { font-size: 16px; }
     }
     @media (prefers-reduced-motion: reduce) {
       .mascot, .mascot img { animation: none !important; }
@@ -944,6 +960,46 @@
       if (force || !state.manualScroll) requestAnimationFrame(() => { $("chat").scrollTop = $("chat").scrollHeight; });
     }
 
+    let viewportFrame = 0;
+    function syncViewportHeight() {
+      cancelAnimationFrame(viewportFrame);
+      viewportFrame = requestAnimationFrame(() => {
+        const height = window.visualViewport?.height || window.innerHeight;
+        document.documentElement.style.setProperty("--app-height", `${Math.round(height)}px`);
+      });
+    }
+
+    function installMobileStability() {
+      let touchY = 0;
+      const scrollableSelector = ".chat, .history, .modal";
+      document.addEventListener("touchstart", event => {
+        if (event.touches.length === 1) touchY = event.touches[0].clientY;
+      }, {passive: true});
+      document.addEventListener("touchmove", event => {
+        if (event.touches.length !== 1) { event.preventDefault(); return; }
+        const target = event.target instanceof Element ? event.target : null;
+        const scroller = target?.closest(scrollableSelector);
+        if (!scroller) {
+          if (!target?.closest("textarea, input, select")) event.preventDefault();
+          return;
+        }
+        const nextY = event.touches[0].clientY;
+        const delta = nextY - touchY;
+        const atTop = scroller.scrollTop <= 0;
+        const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
+        if ((atTop && delta > 0) || (atBottom && delta < 0)) event.preventDefault();
+        touchY = nextY;
+      }, {passive: false});
+      document.addEventListener("gesturestart", event => event.preventDefault(), {passive: false});
+      window.addEventListener("scroll", () => {
+        if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+      }, {passive: true});
+      window.addEventListener("resize", syncViewportHeight, {passive: true});
+      window.visualViewport?.addEventListener("resize", syncViewportHeight, {passive: true});
+      window.visualViewport?.addEventListener("scroll", syncViewportHeight, {passive: true});
+      syncViewportHeight();
+    }
+
     function setupVoice() {
       const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!Recognition) { $("micButton").title = "Speech recognition is not supported in this browser"; return; }
@@ -1023,6 +1079,7 @@
     window.addEventListener("beforeunload", () => state.objectUrls.forEach(url => URL.revokeObjectURL(url)));
 
     $("autoplayInput").checked = localStorage.getItem("hermesAutoPlay") !== "false";
+    installMobileStability();
     setupVoice();
     renderWelcome();
     connect();
